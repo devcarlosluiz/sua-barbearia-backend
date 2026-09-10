@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Django
+*.log
+db.sqlite3
+media/
+staticfiles/
+schema.yml
+
+# Env
+.env
+.env.*
+!.env.example
+
+# Certificados TLS do Nginx (produção)
+docker/nginx/certs/
+
+# IDE
+.idea/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,25 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+media/
+staticfiles/
+.env
+.env.*
+!.env.example
+
+# Fora do contexto de build da imagem: o Dockerfile só precisa do código
+# Python. Estes entram no repositório, mas não na imagem.
+.git/
+.github/
+.idea/
+.vscode/
+docs/
+docker/
+docker-compose*.yml
+*.log

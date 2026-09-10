@@ -1,0 +1,61 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = [
+    "**/migrations/**",
+    ".venv",
+    "staticfiles",
+    "media",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "C4",   # comprehensions
+    "DJ",   # flake8-django
+    "SIM",  # simplify
+    "RUF",  # ruff-specific
+]
+ignore = [
+    "E501",    # comprimento de linha é responsabilidade do formatter
+    "B008",    # chamadas em defaults são idiomáticas no DRF/Django
+    "RUF012",  # atributos mutáveis de classe são o padrão do Django/DRF
+    "SIM105",  # try/except/pass explícito é mais legível aqui
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Settings usam import * por design (base -> dev/test/prod).
+"config/settings/*.py" = ["F403", "F405", "E402"]
+# Testes podem ter imports locais e asserts longos.
+"**/tests/**" = ["B011", "SIM117"]
+"conftest.py" = ["B011"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["apps", "config"]
+combine-as-imports = true
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.coverage.run]
+source = ["apps"]
+omit = [
+    "*/migrations/*",
+    "*/tests/*",
+    "*/__init__.py",
+    "*/apps.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]

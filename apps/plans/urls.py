@@ -1,0 +1,29 @@
+"""Rotas de planos e assinaturas (prefixo: /api/v1/)."""
+
+from __future__ import annotations
+
+from django.urls import include, path
+from rest_framework.routers import DefaultRouter
+
+from apps.plans.views import (
+    MercadoPagoWebhookView,
+    PlanViewSet,
+    SubscriptionInvoiceViewSet,
+    SubscriptionViewSet,
+)
+
+router = DefaultRouter()
+router.register("plans", PlanViewSet, basename="plan")
+router.register("subscriptions", SubscriptionViewSet, basename="subscription")
+router.register(
+    "subscription-invoices", SubscriptionInvoiceViewSet, basename="subscription-invoice"
+)
+
+urlpatterns = [
+    path(
+        "webhooks/mercado-pago/",
+        MercadoPagoWebhookView.as_view(),
+        name="mercado-pago-webhook",
+    ),
+    path("", include(router.urls)),
+]

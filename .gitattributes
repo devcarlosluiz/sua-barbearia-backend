@@ -1,0 +1,39 @@
+# Normaliza fim de linha por tipo de arquivo.
+#
+# Sem isto, com `core.autocrlf=true` no Windows (o padrão do Git for Windows) a
+# árvore de trabalho local fica com CRLF. O `docker build` local passa a ler um
+# Dockerfile com CRLF, e qualquer script que fosse copiado para dentro da
+# imagem quebraria com `$'\r': command not found` no Linux.
+* text=auto
+
+# Sempre LF: são lidos por Linux (imagem Docker, CI)
+Dockerfile      text eol=lf
+*.py            text eol=lf
+*.sh            text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.conf          text eol=lf
+*.toml          text eol=lf
+*.ini           text eol=lf
+*.txt           text eol=lf
+*.md            text eol=lf
+.env.example    text eol=lf
+.dockerignore   text eol=lf
+.gitignore      text eol=lf
+
+# Sempre CRLF: rodam no Windows
+*.ps1           text eol=crlf
+*.bat           text eol=crlf
+*.cmd           text eol=crlf
+
+# Binários
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.otf binary
+*.ttf binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
