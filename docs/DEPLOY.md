@@ -125,6 +125,12 @@ só renova faltando menos de 30 dias) e o nginx recarrega a cada 6h.
 
 ## 5. Subir
 
+A rede compartilhada com o stack do app precisa existir antes. Crie uma vez:
+
+```bash
+docker network create suabarbearia_edge
+```
+
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
 ```
@@ -170,11 +176,46 @@ No navegador:
 - https://clmlabs.com.br/admin/ — admin
 - https://clmlabs.com.br/health/ — status de banco e cache
 
-Este repositório é só o backend: não existe tela de sistema para abrir na
-raiz. O que dá para exercitar por aqui é a API pelo Swagger e o CRUD pelo
-admin. A interface é o app Flutter, que mora em outro repositório.
+Enquanto o app Flutter não estiver publicado, a raiz redireciona para o
+Swagger. Depois do passo 7 ela passa a servir o app.
 
-## 7. Depois que estabilizar
+## 7. App Flutter (repositório `sua-barbearia-frontend`)
+
+O app e a API ficam no **mesmo domínio**, com um único certificado. O nginx
+deste repositório é a porta de entrada e reparte por caminho:
+
+| Caminho | Destino |
+|---|---|
+| `/api/`, `/admin/`, `/health/`, `/static/`, `/media/` | Django |
+| qualquer outro | container do app (`frontend`) |
+
+Como app e API compartilham a origem, o navegador não faz requisição
+cross-origin — o CORS deixa de participar.
+
+No outro repositório, na mesma VM:
+
+```bash
+git clone <url-do-frontend> sua-barbearia-frontend
+cd sua-barbearia-frontend
+
+cp .env.prod.example .env     # API_BASE_URL precisa bater com o DOMAIN daqui
+docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
+```
+
+O build do Flutter demora alguns minutos. A `API_BASE_URL` é gravada **na
+compilação**: trocá-la exige `--build`, reiniciar o container não adianta.
+
+Os dois stacks continuam independentes — sobem, caem e são reconstruídos
+separadamente. A ligação é só a rede `suabarbearia_edge`, onde o app se
+apresenta com o apelido `frontend`.
+
+> O nginx resolve o endereço do app **por requisição**, não na inicialização.
+> Isso é deliberado: um `upstream` comum faria o nginx abortar com "host not
+> found in upstream" enquanto o container do app não existisse, derrubando
+> junto a API, o admin e o desafio do ACME. Do jeito atual, sem o app no ar a
+> raiz apenas redireciona para o Swagger.
+
+## 8. Depois que estabilizar
 
 Ligue o HSTS no `.env` e reinicie o backend:
 

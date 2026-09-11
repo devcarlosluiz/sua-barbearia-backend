@@ -1,4 +1,4 @@
-# Proxy reverso de produção: TLS do Let's Encrypt + static/media.
+# Proxy reverso de produção: TLS do Let's Encrypt, Django e app Flutter.
 #
 # MODELO, não configuração final. O container do nginx roda `envsubst` neste
 # arquivo na subida, substituindo apenas ${DOMAIN} — as variáveis do próprio
@@ -6,6 +6,14 @@
 # chamado com a lista explícita de nomes a substituir.
 #
 # Para trocar de domínio, mexa só no DOMAIN do .env. Não edite este arquivo.
+#
+# Repartição das rotas, tudo sob o mesmo domínio e o mesmo certificado:
+#
+#   /api/ /admin/ /health/ /static/ /media/  -> Django
+#   qualquer outra coisa                     -> app Flutter (container `frontend`)
+#
+# Mesma origem para o app e a API significa que o navegador não faz requisição
+# cross-origin: o CORS deixa de participar da conversa.
 #
 # O `nginx.conf` ao lado continua sendo o de desenvolvimento (HTTP na 8081).
 
@@ -56,6 +64,25 @@ server {
     add_header X-Frame-Options "DENY" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 
+    # Definidos uma vez no server e herdados por todos os `location` abaixo.
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    # É este header que faz o SECURE_SSL_REDIRECT do Django enxergar HTTPS.
+    # Sem ele o Django redireciona para https em looping.
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Request-ID $request_id;
+    proxy_redirect off;
+
+    # ------------------------------------------------------------------
+    # Django
+    # ------------------------------------------------------------------
+    location /api/    { proxy_pass http://suabarbearia_backend; }
+    location /admin/  { proxy_pass http://suabarbearia_backend; }
+    location /health/ { proxy_pass http://suabarbearia_backend; }
+
+    # `static` e `media` são do Django e não colidem com o app: o build do
+    # Flutter publica em /assets/, /canvaskit/, /icons/ e /v/<hash>/.
     location /static/ {
         alias /var/www/static/;
         expires 30d;
@@ -68,15 +95,29 @@ server {
         access_log off;
     }
 
+    # ------------------------------------------------------------------
+    # App Flutter
+    # ------------------------------------------------------------------
     location / {
-        proxy_pass http://suabarbearia_backend;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        # É este header que faz o SECURE_SSL_REDIRECT do Django enxergar HTTPS.
-        # Sem ele o Django redireciona para https em looping.
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Request-ID $request_id;
-        proxy_redirect off;
+        # Resolução em tempo de REQUISIÇÃO, não de inicialização.
+        #
+        # Um `upstream { server frontend:80; }` faria o nginx resolver o nome
+        # ao carregar a configuração e ABORTAR com "host not found in upstream"
+        # enquanto o container do app não existisse — derrubando junto a API, o
+        # admin e o desafio do ACME. Com o endereço numa variável e o resolver
+        # interno do Docker (127.0.0.11), o nginx sobe normalmente e só falha a
+        # rota do app.
+        resolver 127.0.0.11 valid=10s ipv6=off;
+        set $app_upstream http://frontend:80;
+        proxy_pass $app_upstream$request_uri;
+
+        # Enquanto o app não estiver publicado, a raiz cai na documentação da
+        # API em vez de devolver um 502 seco.
+        proxy_next_upstream off;
+        error_page 502 503 504 = @app_indisponivel;
+    }
+
+    location @app_indisponivel {
+        return 302 /api/docs/;
     }
 }

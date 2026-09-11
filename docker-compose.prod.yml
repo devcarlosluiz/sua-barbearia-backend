@@ -95,6 +95,11 @@ services:
       && nginx -g 'daemon off;'"
     depends_on:
       - backend
+    # `default` precisa ser repetida: declarar redes aqui substitui a implícita,
+    # e sem ela o nginx perderia o caminho até o `backend`.
+    networks:
+      - default
+      - edge
 
   # Renovação automática. A emissão inicial é feita pelo
   # scripts/init_letsencrypt.sh — o certbot só renova quando falta menos de
@@ -112,3 +117,14 @@ services:
 volumes:
   certbot_certs:
   certbot_www:
+
+# Ponte com o stack do app Flutter, que vive em outro repositório e sobe
+# separado. Crie uma vez, antes do primeiro `up`:
+#
+#   docker network create suabarbearia_edge
+#
+# O nginx daqui alcança o app pelo apelido `frontend` nessa rede.
+networks:
+  edge:
+    name: suabarbearia_edge
+    external: true
