@@ -202,6 +202,7 @@ Copie `.env.example` para `.env`. Nunca versione o `.env`.
 | `CORS_ALLOWED_ORIGINS` | Origens liberadas para o Flutter Web |
 | `JWT_ACCESS_LIFETIME` | Validade do access token (minutos) |
 | `JWT_REFRESH_LIFETIME` | Validade do refresh token (dias) |
+| `GOOGLE_OAUTH_CLIENT_IDS` | Client IDs aceitos em `/auth/google/` (Android, iOS, Web) |
 | `EMAIL_*` | Envio de e-mail (dev usa o backend de console) |
 | `MERCADO_PAGO_*` | Planos mensais (checkout e webhook) |
 | `FIREBASE_PROJECT_ID` | Push notification (opcional) |

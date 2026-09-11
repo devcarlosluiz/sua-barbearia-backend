@@ -73,6 +73,13 @@ class User(AbstractBaseUser, PermissionsMixin, BaseModel):
         db_index=True,
     )
     avatar = models.ImageField(_("avatar"), upload_to=user_avatar_path, blank=True, null=True)
+    # `sub` do ID token do Google — o identificador estável da conta Google.
+    # Guardamos ele, e não o e-mail, porque o e-mail do Google pode mudar.
+    # `null` (e não string vazia) para que o `unique` não colida entre as
+    # contas que entram por e-mail e senha.
+    google_id = models.CharField(
+        _("ID da conta Google"), max_length=64, unique=True, null=True, blank=True
+    )
     is_active = models.BooleanField(_("ativo"), default=True)
     is_verified = models.BooleanField(_("verificado"), default=False)
     is_staff = models.BooleanField(_("acesso ao admin"), default=False)
@@ -119,6 +126,10 @@ class User(AbstractBaseUser, PermissionsMixin, BaseModel):
     @property
     def is_client(self) -> bool:
         return self.role == UserRole.CLIENT
+
+    @property
+    def has_google_account(self) -> bool:
+        return bool(self.google_id)
 
 
 class PasswordResetToken(models.Model):

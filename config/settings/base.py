@@ -259,6 +259,17 @@ SPECTACULAR_SETTINGS = {
 }
 
 # ---------------------------------------------------------------------------
+# Entrar com o Google
+# ---------------------------------------------------------------------------
+# Client IDs aceitos no ID token (claim `aud`). São públicos — o segredo do
+# OAuth não é usado aqui, porque quem fala com o Google é o app.
+#
+# Informe TODOS os client IDs da credencial: o Android, o iOS e o Web têm IDs
+# diferentes, e o token só é aceito se o `aud` dele estiver nesta lista. Sem
+# nenhum valor, `/auth/google/` responde 503 e o resto do login segue normal.
+GOOGLE_OAUTH_CLIENT_IDS = env.list("GOOGLE_OAUTH_CLIENT_IDS", default=[])
+
+# ---------------------------------------------------------------------------
 # CORS
 # ---------------------------------------------------------------------------
 CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=["http://localhost:8080"])

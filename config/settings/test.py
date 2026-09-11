@@ -22,3 +22,5 @@ REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"] = {
 }
 
 MEDIA_ROOT = BASE_DIR / "test-media"
+
+GOOGLE_OAUTH_CLIENT_IDS = ["test-client-id.apps.googleusercontent.com"]

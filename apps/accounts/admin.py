@@ -10,12 +10,14 @@ class UserAdmin(BaseUserAdmin):
     list_filter = ("role", "is_active", "is_verified", "is_staff")
     search_fields = ("email", "first_name", "last_name", "phone")
     ordering = ("first_name", "last_name")
-    readonly_fields = ("uuid", "created_at", "updated_at", "last_login")
+    # `google_id` é só leitura: quem grava é o fluxo de login com o Google, e
+    # digitar um `sub` errado aqui daria a conta de alguém para outra pessoa.
+    readonly_fields = ("uuid", "created_at", "updated_at", "last_login", "google_id")
 
     fieldsets = (
         (None, {"fields": ("email", "password")}),
         ("Dados pessoais", {"fields": ("first_name", "last_name", "phone", "avatar")}),
-        ("Perfil", {"fields": ("role", "is_verified")}),
+        ("Perfil", {"fields": ("role", "is_verified", "google_id")}),
         (
             "Permissões",
             {"fields": ("is_active", "is_staff", "is_superuser", "groups", "user_permissions")},

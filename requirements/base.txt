@@ -27,3 +27,9 @@ python-dateutil>=2.9,<3.0
 # não é usado: a superfície que consumimos são 5 endpoints REST, e um wrapper
 # próprio mantém timeouts, idempotência e mascaramento de segredo sob controle.
 requests>=2.32,<3.0
+
+# Verificação local do ID token do "Entrar com o Google" (apps/accounts/google.py).
+# O extra `crypto` traz o `cryptography`, exigido para conferir a assinatura
+# RS256 do Google. O SimpleJWT já depende do PyJWT, mas só do HS256 — sem o
+# extra, a validação do token do Google falha em tempo de execução.
+PyJWT[crypto]>=2.10,<3.0

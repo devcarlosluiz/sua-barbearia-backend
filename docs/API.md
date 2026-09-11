@@ -39,6 +39,67 @@ Authorization: Bearer <access_token>
 Quando o access expira, o app chama `POST /api/v1/auth/refresh/` com o refresh
 token; se esse também falhar, a sessão é encerrada.
 
+### Entrar com o Google
+
+O mesmo endpoint cadastra e faz login: o app abre o Sign in with Google e envia
+o `id_token` recebido. Não há senha nem data de nascimento no caminho — quem
+entra pela primeira vez já sai autenticado, com papel `CLIENT`.
+
+`POST /api/v1/auth/google/`
+
+```json
+{ "id_token": "eyJhbGciOiJSUzI1NiIs...", "preferred_branch_id": 1 }
+```
+
+A resposta é a mesma do login, com um `created` a mais — `true` quando a conta
+acabou de ser criada (HTTP 201) e `false` quando era um login (HTTP 200):
+
+```json
+{
+  "success": true,
+  "data": {
+    "access": "eyJhbGciOi...",
+    "refresh": "eyJhbGciOi...",
+    "created": true,
+    "user": {
+      "id": 42,
+      "name": "Joana Souza",
+      "email": "joana@gmail.com",
+      "role": "CLIENT",
+      "has_google_account": true,
+      "has_password": false
+    }
+  },
+  "message": null,
+  "errors": null
+}
+```
+
+Detalhes que valem para o app:
+
+- `preferred_branch_id` é opcional e só é gravado no primeiro acesso.
+- Se já existir uma conta com aquele e-mail, ela é **vinculada** à conta Google
+  em vez de recusada — o Google já provou que o e-mail é da pessoa. A senha
+  antiga continua valendo, e os dois caminhos de login passam a funcionar.
+- `has_password: false` indica conta que só entra pelo Google. É o sinal para a
+  tela de conta oferecer "criar senha" (via `forgot-password`) em vez de
+  "alterar senha", que exige a senha atual.
+- O vínculo é pelo `sub` do Google, não pelo e-mail: se a pessoa trocar o
+  endereço no Google, continua entrando na mesma conta.
+
+Erros específicos:
+
+| HTTP | `code` | Quando |
+| --- | --- | --- |
+| 401 | `INVALID_GOOGLE_TOKEN` | Token expirado, adulterado, emitido para outro app ou com e-mail não verificado |
+| 403 | `ACCOUNT_INACTIVE` | A conta existe, mas foi desativada pela barbearia |
+| 503 | `GOOGLE_AUTH_NOT_CONFIGURED` | `GOOGLE_OAUTH_CLIENT_IDS` vazio no servidor |
+
+No backend, configure `GOOGLE_OAUTH_CLIENT_IDS` com **todos** os client IDs da
+credencial OAuth (Android, iOS e Web). O token só é aceito se o `aud` dele
+estiver na lista — sem isso, um token emitido para outro aplicativo Google
+serviria para entrar aqui.
+
 ## Envelope de resposta
 
 Toda resposta segue o mesmo formato.
@@ -93,6 +154,7 @@ Legenda de acesso: **O** = OWNER · **B** = BARBER · **C** = CLIENT · **–** 
 | Método | Rota | Acesso | Descrição |
 |---|---|---|---|
 | POST | `/auth/login/` | – | Login (retorna access, refresh e usuário) |
+| POST | `/auth/google/` | – | Entrar com o Google (cadastra CLIENT na 1ª vez) |
 | POST | `/auth/refresh/` | – | Renova o access token |
 | POST | `/auth/logout/` | O B C | Invalida o refresh token |
 | POST | `/auth/register/` | – | Cadastro público (sempre cria CLIENT) |

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 
+from django.contrib.auth.models import update_last_login
 from django.db import transaction
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 from rest_framework import status, viewsets
@@ -18,9 +19,11 @@ from apps.accounts.models import PasswordResetToken, User
 from apps.accounts.serializers import (
     ChangePasswordSerializer,
     ForgotPasswordSerializer,
+    GoogleAuthSerializer,
     LogoutSerializer,
     RegisterSerializer,
     ResetPasswordSerializer,
+    SuaBarbeariaTokenObtainPairSerializer,
     UserAdminSerializer,
     UserProfileUpdateSerializer,
     UserSerializer,
@@ -100,8 +103,6 @@ class RegisterView(GenericAPIView):
         serializer.is_valid(raise_exception=True)
         user = serializer.save()
 
-        from apps.accounts.serializers import SuaBarbeariaTokenObtainPairSerializer
-
         refresh = SuaBarbeariaTokenObtainPairSerializer.get_token(user)
         audit.log_create(user, user=user)
         return Response(
@@ -111,6 +112,51 @@ class RegisterView(GenericAPIView):
                 "user": UserSerializer(user, context=self.get_serializer_context()).data,
             },
             status=status.HTTP_201_CREATED,
+        )
+
+
+@extend_schema(tags=["Autenticação"])
+class GoogleAuthView(GenericAPIView):
+    """Entrar com o Google. Cadastra na primeira vez e faz login nas demais.
+
+    Não pede senha nem data de nascimento: o app envia o `id_token` do Sign in
+    with Google e recebe de volta o mesmo par de tokens do login normal.
+    Responde 201 quando a conta acabou de ser criada e 200 quando já existia.
+    """
+
+    serializer_class = GoogleAuthSerializer
+    permission_classes = [AllowAny]
+    throttle_scope = "login"
+
+    @extend_schema(responses={200: UserSerializer, 201: UserSerializer})
+    def post(self, request: Request) -> Response:
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
+        created = serializer.created
+
+        refresh = SuaBarbeariaTokenObtainPairSerializer.get_token(user)
+        # O login por e-mail e senha atualiza `last_login` pelo SimpleJWT
+        # (UPDATE_LAST_LOGIN); aqui o token é emitido direto, então cabe a nós.
+        update_last_login(None, user)
+
+        if created:
+            audit.log_create(user, user=user)
+        audit.log_action(
+            action=AuditAction.LOGIN,
+            entity="accounts.User",
+            entity_id=user.pk,
+            new_data={"email": user.email, "provider": "google"},
+            user=user,
+        )
+        return Response(
+            {
+                "access": str(refresh.access_token),
+                "refresh": str(refresh),
+                "created": created,
+                "user": UserSerializer(user, context=self.get_serializer_context()).data,
+            },
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
 
 

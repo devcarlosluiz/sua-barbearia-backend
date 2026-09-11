@@ -96,6 +96,34 @@ class TestRegister:
         assert Client.objects.filter(user=user, preferred_branch=branch).exists()
         assert data_of(response)["access"]
 
+    def test_registro_nao_exige_data_de_nascimento(self, api):
+        payload = {
+            "first_name": "Sem",
+            "last_name": "Aniversário",
+            "email": "sem-aniversario@test.com",
+            "password": PASSWORD,
+            "password_confirm": PASSWORD,
+        }
+        response = api.post("/api/v1/auth/register/", payload, format="json")
+        assert response.status_code == 201, response.data
+
+        profile = Client.objects.get(user__email="sem-aniversario@test.com")
+        assert profile.birth_date is None
+
+    def test_registro_aceita_data_de_nascimento_quando_informada(self, api):
+        payload = {
+            "first_name": "Com",
+            "email": "com-aniversario@test.com",
+            "password": PASSWORD,
+            "password_confirm": PASSWORD,
+            "birth_date": "1990-05-20",
+        }
+        response = api.post("/api/v1/auth/register/", payload, format="json")
+        assert response.status_code == 201, response.data
+        assert str(Client.objects.get(user__email="com-aniversario@test.com").birth_date) == (
+            "1990-05-20"
+        )
+
     def test_registro_com_email_duplicado_falha(self, api, owner):
         payload = {
             "first_name": "Duplicado",
