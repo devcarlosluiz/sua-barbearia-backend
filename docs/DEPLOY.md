@@ -157,9 +157,14 @@ curl -I http://teste.clmlabs.com.br/health/   # 301 para https
 
 No navegador:
 
+- https://teste.clmlabs.com.br/ — redireciona para o Swagger
 - https://teste.clmlabs.com.br/api/docs/ — Swagger
 - https://teste.clmlabs.com.br/admin/ — admin
 - https://teste.clmlabs.com.br/health/ — status de banco e cache
+
+Este repositório é só o backend: não existe tela de sistema para abrir na
+raiz. O que dá para exercitar por aqui é a API pelo Swagger e o CRUD pelo
+admin. A interface é o app Flutter, que mora em outro repositório.
 
 ## 7. Depois que estabilizar
 
@@ -248,6 +253,16 @@ esquema** em `CSRF_TRUSTED_ORIGINS`: `https://teste.clmlabs.com.br`.
 
 **Certbot falha com "Timeout during connect".** O desafio HTTP não chegou:
 DNS ainda não propagou, ou a porta 80 está fechada no firewall do provedor.
+
+**Certbot falha com "NXDOMAIN looking up A for ...".** O registro DNS não
+existe. O script agora barra esse caso no passo 0, antes de mexer em qualquer
+coisa — se você viu essa mensagem vinda do próprio certbot, está com uma versão
+antiga do script.
+
+Atenção à cota: o Let's Encrypt permite **5 validações falhas por hostname por
+hora** no ambiente real. Por isso o ensaio com `STAGING=1` vem primeiro — o
+ambiente de teste tem limites muito maiores. Se você estourar, a espera é de
+uma hora.
 
 **Logs:**
 

@@ -6,6 +6,7 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import include, path
+from django.views.generic import RedirectView
 from drf_spectacular.views import (
     SpectacularAPIView,
     SpectacularRedocView,
@@ -36,6 +37,13 @@ api_v1_patterns = [
 ]
 
 urlpatterns = [
+    # A raiz não serve conteúdo: este repositório é só o backend. Apontar para
+    # a documentação evita que o domínio puro devolva um 404 sem explicação.
+    #
+    # Redirecionamento TEMPORÁRIO de propósito: quando o app Flutter for
+    # publicado, a raiz passa a ser dele. Um 301 ficaria no cache do navegador
+    # e continuaria mandando os usuários para o Swagger depois da troca.
+    path("", RedirectView.as_view(url="/api/docs/", permanent=False), name="root"),
     path("admin/", admin.site.urls),
     path("health/", HealthCheckView.as_view(), name="health-check"),
     path("api/v1/", include((api_v1_patterns, "v1"), namespace="v1")),
