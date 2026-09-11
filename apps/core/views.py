@@ -60,6 +60,10 @@ class HealthCheckView(APIView):
             return False
 
 
+# O `responses` de cada método não é enfeite: sendo esta uma `APIView` pura,
+# sem `queryset` nem `serializer_class`, o drf-spectacular não tem como inferir
+# o que sai daqui. Sem a declaração ele registra "unable to guess serializer" e
+# DESCARTA a view — os endpoints de identidade visual sumiam da documentação.
 @extend_schema_view(
     get=extend_schema(
         tags=["Identidade visual"],
@@ -69,20 +73,24 @@ class HealthCheckView(APIView):
             "login precisa da logo antes de existir sessão. Quando não há logo "
             "enviada, `logo_url` vem nulo e o app usa a marca padrão."
         ),
+        responses=BrandingSerializer,
     ),
     put=extend_schema(
         tags=["Identidade visual"],
         summary="Enviar logo (OWNER)",
         request={"multipart/form-data": BrandingLogoUploadSerializer},
+        responses=BrandingSerializer,
     ),
     patch=extend_schema(
         tags=["Identidade visual"],
         summary="Alterar o nome da barbearia (OWNER)",
         request=BrandingNameSerializer,
+        responses=BrandingSerializer,
     ),
     delete=extend_schema(
         tags=["Identidade visual"],
         summary="Voltar à logo padrão (OWNER)",
+        responses=BrandingSerializer,
     ),
 )
 class BrandingView(APIView):
@@ -93,16 +101,35 @@ class BrandingView(APIView):
 
     def get_permissions(self):
         # A leitura é aberta (tela de login); a escrita é do proprietário.
-        if self.request.method == "GET":
+        if self._is_public_read():
             return [AllowAny()]
         return [IsOwner()]
 
     def get_authenticators(self):
         # Sem isto, um token expirado faria o GET público falhar com 401 e a
         # tela de login ficaria sem logo justamente para quem precisa entrar.
-        if self.request.method == "GET":
+        if self._is_public_read():
             return []
         return super().get_authenticators()
+
+    def _is_public_read(self) -> bool:
+        """Verdadeiro apenas quando há uma requisição real e ela é um GET.
+
+        O DRF chama `get_authenticators()` de dentro de `initialize_request()`,
+        que roda ANTES de `self.request` ser atribuído no `dispatch()`. Numa
+        requisição HTTP isso passa despercebido porque o `setup()` do Django já
+        preencheu `self.request`.
+
+        O drf-spectacular não segue esse caminho: ele chama
+        `initialize_request()` direto, com `view.request = None`. Ler
+        `.method` sem checagem derrubava a geração inteira do schema, e
+        `/api/schema/` respondia 500 — deixando o Swagger sem carregar.
+
+        Sem requisição, o caminho seguro é o restritivo: autentica e exige
+        proprietário.
+        """
+        request = getattr(self, "request", None)
+        return request is not None and request.method == "GET"
 
     def get(self, request: Request) -> Response:
         branding = Branding.load()
