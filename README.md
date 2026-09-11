@@ -174,7 +174,7 @@ sua-barbearia-backend/
 ├── requirements/               # base.txt, dev.txt, prod.txt
 ├── scripts/smoke_test.py       # teste de fumaça da API
 ├── docker/nginx/nginx.conf     # proxy reverso de desenvolvimento
-├── docker/nginx/prod.conf      # proxy reverso de produção (TLS)
+├── docker/nginx/prod.conf.template # produção (TLS), ${DOMAIN} vem do .env
 ├── scripts/init_letsencrypt.sh # emissão inicial do certificado
 ├── docs/                       # ARCHITECTURE.md, API.md e DEPLOY.md
 ├── Dockerfile                  # estágios development e production

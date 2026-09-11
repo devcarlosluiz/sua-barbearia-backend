@@ -7,7 +7,7 @@
 #
 # Variáveis aceitas:
 #   LETSENCRYPT_EMAIL  (obrigatória) recebe os avisos de expiração
-#   DOMAIN             padrão teste.clmlabs.com.br
+#   DOMAIN             lido do .env; pode ser sobrescrito aqui
 #   STAGING=1          ensaia contra o ambiente de teste do Let's Encrypt
 #   SKIP_DNS_CHECK=1   pula a verificação de DNS (raramente necessário)
 #
@@ -17,7 +17,13 @@
 # auto-assinado descartável e trocá-lo pelo real em seguida.
 set -euo pipefail
 
-DOMAIN="${DOMAIN:-teste.clmlabs.com.br}"
+# O domínio vem do .env, o mesmo que o nginx usa — assim não há dois lugares
+# para manter em sincronia. Pode ser sobrescrito na linha de comando.
+if [ -z "${DOMAIN:-}" ] && [ -f .env ]; then
+    DOMAIN=$(sed -n 's/^[[:space:]]*DOMAIN[[:space:]]*=[[:space:]]*//p' .env \
+             | head -1 | tr -d '"'\''' | tr -d '\r')
+fi
+DOMAIN="${DOMAIN:?defina DOMAIN no .env (ex.: DOMAIN=clmlabs.com.br) ou na linha de comando}"
 # Sem apóstrofo nesta mensagem: dentro de ${VAR:?...} ele abre uma citação e
 # quebra o parser do bash.
 EMAIL="${LETSENCRYPT_EMAIL:?defina LETSENCRYPT_EMAIL. Este endereço recebe os avisos de expiração do certificado}"

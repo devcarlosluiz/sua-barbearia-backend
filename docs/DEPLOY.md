@@ -1,4 +1,4 @@
-# Deploy na VM — teste.clmlabs.com.br
+# Deploy na VM — clmlabs.com.br
 
 Ambiente de teste público: VM `188.220.168.196`, domínio `clmlabs.com.br`.
 
@@ -6,30 +6,38 @@ O que sobe: API em `/api/v1/`, admin do Django em `/admin/`, Swagger em
 `/api/docs/`. O app Flutter vive em outro repositório e não é publicado por
 aqui.
 
-> **Por que subdomínio e não `clmlabs.com.br/suabarbearia`.** Servir Django sob
-> um subpath exige `FORCE_SCRIPT_NAME`, prefixar `STATIC_URL`/`MEDIA_URL`,
-> ajustar `SESSION_COOKIE_PATH`/`CSRF_COOKIE_PATH` e reescrever caminhos no
-> nginx — e qualquer URL absoluta gerada pelo Django (redirect de login do
-> admin, links do Swagger) vira candidata a quebrar. O subdomínio custa um
-> registro DNS e nenhuma linha de código. Se o subpath for requisito, dá para
-> fazer depois, mas é outro trabalho.
+> **Por que a raiz do domínio e não `clmlabs.com.br/suabarbearia`.** Servir
+> Django sob um subpath exige `FORCE_SCRIPT_NAME`, prefixar
+> `STATIC_URL`/`MEDIA_URL`, ajustar `SESSION_COOKIE_PATH`/`CSRF_COOKIE_PATH` e
+> reescrever caminhos no nginx — e qualquer URL absoluta gerada pelo Django
+> (redirect de login do admin, links do Swagger) vira candidata a quebrar.
+> Servir na raiz não custa linha de código nenhuma. Se o subpath virar
+> requisito, dá para fazer depois, mas é outro trabalho.
 
 ---
 
 ## 1. DNS
 
-No painel do `clmlabs.com.br`, crie:
+O domínio é definido em **um único lugar**, a variável `DOMAIN` do `.env`. Ela
+alimenta o `server_name` e o caminho do certificado no nginx (via `envsubst`
+sobre o `docker/nginx/prod.conf.template`) e também o
+`scripts/init_letsencrypt.sh`. Para trocar de domínio depois, mude o `DOMAIN`
+e as três variáveis do Django logo abaixo dele — nenhum arquivo de
+configuração do nginx precisa ser editado.
 
-| Tipo | Nome | Valor |
-|---|---|---|
-| A | `teste` | `188.220.168.196` |
-
-Confirme a propagação antes de seguir — o Let's Encrypt vai consultar este
-registro e falha se ele ainda não resolver:
+O apex `clmlabs.com.br` já aponta para a VM, então não há registro a criar.
+Confirme antes de seguir:
 
 ```bash
-dig +short teste.clmlabs.com.br     # precisa devolver 188.220.168.196
+dig +short clmlabs.com.br     # precisa devolver 188.220.168.196
 ```
+
+> **Se um dia usar um subdomínio novo, crie o registro A ANTES de rodar o
+> certbot.** Consultar um nome que ainda não existe faz os resolvers públicos
+> guardarem o "não existe" por até uma hora — é o campo `minimum` do SOA da
+> zona. Nesse intervalo o Let's Encrypt continua vendo NXDOMAIN mesmo com o
+> registro já publicado, e cada tentativa queima uma das 5 validações por hora.
+> O apex não tem esse problema porque sempre resolveu.
 
 ## 2. Preparar a VM
 
@@ -107,9 +115,9 @@ Entre um e outro, limpe o certificado de staging:
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.prod.yml \
   run --rm --entrypoint sh certbot -c \
-  "rm -rf /etc/letsencrypt/live/teste.clmlabs.com.br \
-          /etc/letsencrypt/archive/teste.clmlabs.com.br \
-          /etc/letsencrypt/renewal/teste.clmlabs.com.br.conf"
+  "rm -rf /etc/letsencrypt/live/clmlabs.com.br \
+          /etc/letsencrypt/archive/clmlabs.com.br \
+          /etc/letsencrypt/renewal/clmlabs.com.br.conf"
 ```
 
 Renovação é automática: o serviço `certbot` tenta a cada 12h (o Let's Encrypt
@@ -151,16 +159,16 @@ $CP exec backend python manage.py seed_data
 
 ```bash
 $CP ps                                        # os 6 containers de pé
-curl -I https://teste.clmlabs.com.br/health/  # 200
-curl -I http://teste.clmlabs.com.br/health/   # 301 para https
+curl -I https://clmlabs.com.br/health/  # 200
+curl -I http://clmlabs.com.br/health/   # 301 para https
 ```
 
 No navegador:
 
-- https://teste.clmlabs.com.br/ — redireciona para o Swagger
-- https://teste.clmlabs.com.br/api/docs/ — Swagger
-- https://teste.clmlabs.com.br/admin/ — admin
-- https://teste.clmlabs.com.br/health/ — status de banco e cache
+- https://clmlabs.com.br/ — redireciona para o Swagger
+- https://clmlabs.com.br/api/docs/ — Swagger
+- https://clmlabs.com.br/admin/ — admin
+- https://clmlabs.com.br/health/ — status de banco e cache
 
 Este repositório é só o backend: não existe tela de sistema para abrir na
 raiz. O que dá para exercitar por aqui é a API pelo Swagger e o CRUD pelo
@@ -231,12 +239,19 @@ $CP exec postgres psql -U <usuario> -c "ALTER USER <usuario> WITH PASSWORD '<nov
 mais comum é o nginx não achar o certificado (rode o passo 4).
 
 **Subi com `docker compose up` sem os `-f`.** Isso levantou o stack de
-desenvolvimento, com 5432 e 6379 publicados. Derrube e suba direito:
+desenvolvimento, com 5432 e 6379 publicados. Derrube e suba direito — repare
+que o `down` também precisa dos `-f`:
 
 ```bash
-docker compose down
+docker compose -f docker-compose.yml -f docker-compose.prod.yml down --remove-orphans
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 ```
+
+**`docker compose down` reclama `Network ... Resource is still in use`.** Foi
+um `down` sem os `-f`. O projeto de desenvolvimento não conhece os serviços
+`nginx` e `certbot`, que existem só no arquivo de produção: eles sobram
+rodando e seguram a rede. Use sempre `$CP down` (com os dois `-f`); o
+`--remove-orphans` limpa containers de uma composição anterior.
 
 **`celery` e `celery-beat` não sobem.** Eles esperam o `backend` ficar
 *healthy*, e o healthcheck chama `http://localhost:8000/health/`. Se
@@ -245,11 +260,11 @@ o healthcheck nunca passa e os dois ficam presos em `Waiting`. Veja com
 `docker inspect --format '{{json .State.Health}}' suabarbearia_backend`.
 
 **Loop de redirecionamento no navegador.** O nginx precisa repassar
-`X-Forwarded-Proto` (o `prod.conf` já faz). Sem esse header o Django não
+`X-Forwarded-Proto` (o `prod.conf.template` já faz). Sem esse header o Django não
 enxerga o HTTPS e redireciona para sempre.
 
 **CSRF verification failed no login do admin.** Falta o domínio **com
-esquema** em `CSRF_TRUSTED_ORIGINS`: `https://teste.clmlabs.com.br`.
+esquema** em `CSRF_TRUSTED_ORIGINS`: `https://clmlabs.com.br`.
 
 **Certbot falha com "Timeout during connect".** O desafio HTTP não chegou:
 DNS ainda não propagou, ou a porta 80 está fechada no firewall do provedor.

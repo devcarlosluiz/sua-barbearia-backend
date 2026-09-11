@@ -1,10 +1,13 @@
 # Proxy reverso de produção: TLS do Let's Encrypt + static/media.
 #
-# O `nginx.conf` ao lado continua sendo o de desenvolvimento (HTTP na 8081).
-# Este arquivo é montado apenas pelo docker-compose.prod.yml.
+# MODELO, não configuração final. O container do nginx roda `envsubst` neste
+# arquivo na subida, substituindo apenas ${DOMAIN} — as variáveis do próprio
+# nginx ($host, $scheme, $request_uri...) passam intactas porque o envsubst é
+# chamado com a lista explícita de nomes a substituir.
 #
-# O nome do domínio aparece em três lugares aqui e precisa bater com o
-# ALLOWED_HOSTS do .env e com o certificado emitido pelo scripts/init_letsencrypt.sh.
+# Para trocar de domínio, mexa só no DOMAIN do .env. Não edite este arquivo.
+#
+# O `nginx.conf` ao lado continua sendo o de desenvolvimento (HTTP na 8081).
 
 upstream suabarbearia_backend {
     server backend:8000;
@@ -23,7 +26,7 @@ server {
 # HTTP existe só para o desafio do ACME e para empurrar todo o resto ao HTTPS.
 server {
     listen 80;
-    server_name teste.clmlabs.com.br;
+    server_name ${DOMAIN};
 
     location /.well-known/acme-challenge/ {
         root /var/www/certbot;
@@ -37,10 +40,10 @@ server {
 server {
     listen 443 ssl;
     http2 on;
-    server_name teste.clmlabs.com.br;
+    server_name ${DOMAIN};
 
-    ssl_certificate     /etc/letsencrypt/live/teste.clmlabs.com.br/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/teste.clmlabs.com.br/privkey.pem;
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
     ssl_protocols       TLSv1.2 TLSv1.3;
     ssl_session_cache   shared:SSL:10m;
     ssl_session_timeout 1d;
