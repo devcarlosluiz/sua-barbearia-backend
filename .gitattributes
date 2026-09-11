@@ -18,6 +18,7 @@ Dockerfile      text eol=lf
 *.txt           text eol=lf
 *.md            text eol=lf
 .env.example    text eol=lf
+.env.prod.example text eol=lf
 .dockerignore   text eol=lf
 .gitignore      text eol=lf
 

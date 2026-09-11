@@ -173,12 +173,16 @@ sua-barbearia-backend/
 │   └── reports/                # dashboards e relatórios
 ├── requirements/               # base.txt, dev.txt, prod.txt
 ├── scripts/smoke_test.py       # teste de fumaça da API
-├── docker/nginx/nginx.conf     # proxy reverso (static/media)
-├── docs/                       # ARCHITECTURE.md e API.md
+├── docker/nginx/nginx.conf     # proxy reverso de desenvolvimento
+├── docker/nginx/prod.conf      # proxy reverso de produção (TLS)
+├── scripts/init_letsencrypt.sh # emissão inicial do certificado
+├── docs/                       # ARCHITECTURE.md, API.md e DEPLOY.md
 ├── Dockerfile                  # estágios development e production
-├── docker-compose.yml
-├── docker-compose.prod.yml
-└── .env.example
+├── docker-compose.yml          # base, sem portas publicadas
+├── docker-compose.override.yml # extras de dev (carregado automaticamente)
+├── docker-compose.prod.yml     # produção (exige os dois -f)
+├── .env.example
+└── .env.prod.example
 ```
 
 ---
@@ -211,24 +215,34 @@ origem em `CORS_ALLOWED_ORIGINS` e reinicie o backend.
 
 ## Produção
 
+Passo a passo completo de VM (DNS, firewall, TLS do Let's Encrypt) em
+[`docs/DEPLOY.md`](docs/DEPLOY.md). O resumo:
+
 ```bash
+cp .env.prod.example .env      # e preencha os campos marcados com TROQUE
+LETSENCRYPT_EMAIL=voce@exemplo.com ./scripts/init_letsencrypt.sh
 docker compose -f docker-compose.yml -f docker-compose.prod.yml up --build -d
-docker compose exec backend python manage.py collectstatic --noinput
 ```
 
 O `docker-compose.prod.yml` usa o estágio `production` do Dockerfile
 (Gunicorn + WhiteNoise), ativa `config.settings.prod` (HSTS, cookies seguros,
 SSL redirect) e sobe o Nginx como proxy reverso servindo `static/` e `media/`
-nas portas 80/443.
+nas portas 80/443. O `migrate` e o `collectstatic` rodam no boot do container.
+
+> Os dois `-f` são obrigatórios em produção. Sem eles o Compose carrega o
+> `docker-compose.override.yml` junto, que é o arquivo de desenvolvimento — e
+> aí o Postgres e o Redis passam a publicar 5432 e 6379 no host. Numa VM
+> pública isso deixa o Redis, que não tem autenticação, aberto para a internet.
 
 Checklist antes de publicar:
 
-- [ ] `DEBUG=False` e `SECRET_KEY` forte
-- [ ] `ALLOWED_HOSTS` e `CORS_ALLOWED_ORIGINS` com os domínios reais
-- [ ] Certificado TLS em `docker/nginx/certs/` e `SECURE_SSL_REDIRECT=True`
+- [ ] `DEBUG=False` e `SECRET_KEY` forte (e que não comece com `$`)
+- [ ] `ALLOWED_HOSTS` com o domínio **e** `localhost` (o healthcheck depende dele)
+- [ ] `CSRF_TRUSTED_ORIGINS` e `CORS_ALLOWED_ORIGINS` com o esquema `https://`
+- [ ] Certificado emitido pelo `scripts/init_letsencrypt.sh` e `SECURE_SSL_REDIRECT=True`
+- [ ] `SECURE_HSTS_SECONDS` só depois que o domínio estiver estável
 - [ ] Backup automatizado do PostgreSQL
 - [ ] `SENTRY_DSN` configurado
-- [ ] Workers do Celery e o Beat rodando como serviços gerenciados
 
 ---
 
@@ -237,4 +251,6 @@ Checklist antes de publicar:
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — arquitetura, ERD, regras de
   negócio críticas e plano de fases (cobre backend e app).
 - [`docs/API.md`](docs/API.md) — endpoints, envelope de resposta e códigos de erro.
+- [`docs/DEPLOY.md`](docs/DEPLOY.md) — deploy na VM: DNS, firewall, TLS e solução
+  dos problemas mais comuns.
 - Swagger/ReDoc em `/api/docs/` e `/api/redoc/` com o servidor rodando.

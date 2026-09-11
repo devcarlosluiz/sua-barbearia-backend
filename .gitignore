@@ -22,9 +22,7 @@ schema.yml
 .env
 .env.*
 !.env.example
-
-# Certificados TLS do Nginx (produção)
-docker/nginx/certs/
+!.env.prod.example
 
 # IDE
 .idea/

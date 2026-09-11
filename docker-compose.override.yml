@@ -1,0 +1,54 @@
+# Extras de desenvolvimento.
+#
+# O Compose carrega este arquivo automaticamente quando você roda
+# `docker compose ...` sem passar `-f`. Produção usa `-f` explícito
+# (docker-compose.yml + docker-compose.prod.yml) e por isso NÃO carrega nada
+# daqui — nem as portas publicadas, nem o código-fonte montado.
+#
+# Nada disso pode voltar para o docker-compose.yml: o Compose une listas como
+# `ports` e `volumes` entre arquivos, então não há como a sobreposição de
+# produção remover depois o que a base tiver adicionado.
+
+services:
+  postgres:
+    ports:
+      - "5432:5432"
+
+  redis:
+    ports:
+      - "6379:6379"
+
+  backend:
+    # Bind mount do código para o autoreload do runserver enxergar as edições.
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+
+  celery:
+    volumes:
+      - .:/app
+
+  celery-beat:
+    volumes:
+      - .:/app
+
+  # Proxy reverso servindo static/ e media/. Só sobe com `--profile full`;
+  # no dia a dia o runserver do Django já basta.
+  #
+  # Publica em 8081, não 8080: a 8080 pertence ao stack do frontend
+  # (sua-barbearia-frontend), e com os dois compose independentes um bind duplicado
+  # faria o segundo `up` falhar.
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: suabarbearia_nginx
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - media_data:/var/www/media:ro
+      - static_data:/var/www/static:ro
+    ports:
+      - "8081:80"
+    depends_on:
+      - backend
+    profiles:
+      - full
