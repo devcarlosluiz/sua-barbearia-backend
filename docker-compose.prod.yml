@@ -23,15 +23,23 @@ services:
   backend:
     build:
       target: production
+    # NÃO indente as linhas abaixo para "alinhar": o `>` do YAML só junta
+    # linhas que estão no MESMO nível de indentação. Uma linha mais indentada
+    # mantém a quebra, e aí `--bind`, `--workers` etc. viram comandos soltos
+    # (`sh: 4: --bind: not found`) e o gunicorn sobe sem argumento algum,
+    # ouvindo em 127.0.0.1 — onde o nginx não alcança.
+    #
+    # O `exec` faz o gunicorn virar PID 1 e receber o SIGTERM do `docker stop`,
+    # em vez de o shell segurar o sinal e o container morrer no timeout.
     command: >
       sh -c "python manage.py migrate --noinput &&
-             python manage.py collectstatic --noinput &&
-             gunicorn config.wsgi:application
-               --bind 0.0.0.0:8000
-               --workers ${GUNICORN_WORKERS:-4}
-               --timeout 60
-               --access-logfile -
-               --error-logfile -"
+      python manage.py collectstatic --noinput &&
+      exec gunicorn config.wsgi:application
+      --bind 0.0.0.0:8000
+      --workers ${GUNICORN_WORKERS:-4}
+      --timeout 60
+      --access-logfile -
+      --error-logfile -"
     environment:
       DJANGO_SETTINGS_MODULE: config.settings.prod
       DEBUG: "False"

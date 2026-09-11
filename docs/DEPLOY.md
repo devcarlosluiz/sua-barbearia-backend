@@ -66,18 +66,25 @@ cp .env.prod.example .env
 Edite o `.env` e preencha os três campos marcados com `TROQUE`:
 
 ```bash
-# SECRET_KEY — gere e confira que não começa com "$"
-docker compose run --rm backend python -c \
-  "from django.core.management.utils import get_random_secret_key as g; k=g(); print(k if not k.startswith('\$') else g())"
+# SECRET_KEY (base64 não gera "$", veja abaixo por que isso importa)
+openssl rand -base64 48 | tr -d '\n=' ; echo
 
 # DATABASE_PASSWORD e SEED_DEFAULT_PASSWORD
-openssl rand -base64 24
+openssl rand -base64 24 | tr -d '\n=' ; echo
 ```
 
-O `SECRET_KEY` começando com `$` é uma armadilha real: o `django-environ`
+Um `SECRET_KEY` começando com `$` é uma armadilha real: o `django-environ`
 interpretaria o valor como referência a outra variável, não a encontraria, e
 cairia no default inseguro do código — assinando todos os JWT com uma string
-pública, sem erro nem aviso. O comando acima já regera nesse caso.
+pública, sem erro nem aviso. Por isso geramos em base64, que não produz `$`.
+
+> **Não use `docker compose run backend ...` aqui.** Sem os dois `-f`, o
+> Compose usa o estágio `development` da imagem — e o `.env` de produção define
+> `DJANGO_SETTINGS_MODULE=config.settings.prod`, que exige `whitenoise` e
+> `gunicorn`. Esses dois só estão no `requirements/prod.txt`, então o comando
+> morre com `ModuleNotFoundError: No module named 'whitenoise'`. Depois que o
+> stack estiver de pé, `$CP exec backend ...` é seguro: usa o container que já
+> está rodando, com a imagem de produção.
 
 ## 4. Certificado TLS
 
@@ -169,6 +176,50 @@ disso, não há acesso em HTTP nem limpando o cache comum.
 ---
 
 ## Problemas comuns
+
+**Antes de tudo: leia o log, não o resumo do `up`.** Com `restart: always`, um
+container que sai com erro é reiniciado em laço e o Compose reporta
+`is unhealthy` em vez de `exited (1)`. A mensagem esconde a causa:
+
+```bash
+$CP logs backend | tail -40
+```
+
+### `backend` reinicia em laço depois de um `up` de desenvolvimento na VM
+
+Quase sempre é **volume herdado do stack errado**. Rodar `docker compose up`
+sem os `-f` uma vez na VM é suficiente para deixar o ambiente quebrado, e o
+`up` de produção seguinte não conserta sozinho: volumes existentes não são
+recriados.
+
+Duas formas de estragar, as duas com o mesmo conserto:
+
+**1. Permissão em `staticfiles`/`media`.** A imagem de desenvolvimento roda
+como `root` e cria esses diretórios com dono `root`. A de produção roda como o
+usuário sem privilégios `suabarbearia`. Se os volumes foram criados pelo stack
+de desenvolvimento, eles vêm com dono `root` e o `collectstatic` de produção
+morre com `Permission denied`.
+
+**2. Senha do Postgres fora de sincronia.** `POSTGRES_DB`, `POSTGRES_USER` e
+`POSTGRES_PASSWORD` só têm efeito na **primeira** vez que o volume é criado. Se
+você subiu antes de preencher o `.env` e depois trocou a senha, o banco continua
+com a antiga e o Django falha com `FATAL: password authentication failed`. O
+`postgres` ainda assim aparece como `Healthy`, porque o `pg_isready` só verifica
+se o servidor aceita conexões — não autentica.
+
+Como o ambiente é novo e não há dados a preservar:
+
+```bash
+$CP down -v      # -v descarta banco, media e staticfiles
+$CP up --build -d
+```
+
+Num ambiente com dados, para o caso 2, troque a senha no servidor em vez de
+recriar:
+
+```bash
+$CP exec postgres psql -U <usuario> -c "ALTER USER <usuario> WITH PASSWORD '<nova>';"
+```
 
 **Nada responde na porta 80/443.** Confira com `$CP ps` se o
 `suabarbearia_nginx` está de pé. Se não estiver, veja `$CP logs nginx`: o erro
