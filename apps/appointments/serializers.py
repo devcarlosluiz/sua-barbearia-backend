@@ -47,6 +47,10 @@ class AppointmentListSerializer(serializers.ModelSerializer):
     # os botões de cancelar e excluir. Sem este campo o app recebia `false` por
     # omissão e escondia as duas ações.
     can_be_cancelled_by_client = serializers.SerializerMethodField()
+    # O plano mensal precisa aparecer *antes* da finalização: sem este campo a
+    # agenda do barbeiro mostrava o preço cheio e mandava cobrar um cliente que
+    # já pagou a mensalidade. `null` quando não há nada a dizer.
+    plan_coverage = serializers.SerializerMethodField()
 
     class Meta:
         model = Appointment
@@ -71,6 +75,7 @@ class AppointmentListSerializer(serializers.ModelSerializer):
             "status_display",
             "notes",
             "can_be_cancelled_by_client",
+            "plan_coverage",
             "created_at",
         )
 
@@ -84,6 +89,27 @@ class AppointmentListSerializer(serializers.ModelSerializer):
             return False
         deadline = obj.start_datetime - timedelta(hours=obj.branch.cancellation_limit_hours)
         return timezone.now() <= deadline
+
+    def get_plan_coverage(self, obj: Appointment) -> dict[str, Any] | None:
+        return self._coverage_map().get(obj.pk)
+
+    def _coverage_map(self) -> dict[int, Any]:
+        """Resolve a cobertura da lista inteira de uma vez.
+
+        O campo é por item, mas a consulta não pode ser: uma agenda de trinta
+        linhas faria noventa consultas. O mapa é calculado na primeira linha,
+        a partir do `instance` da raiz, e reaproveitado pelas demais.
+        """
+        root = self.parent if isinstance(self.parent, serializers.ListSerializer) else self
+        cached = getattr(root, "_plan_coverage_cache", None)
+        if cached is None:
+            from apps.plans.services import appointment_coverage_map
+
+            instance = root.instance
+            items = [instance] if isinstance(instance, Appointment) else list(instance or [])
+            cached = appointment_coverage_map(items)
+            root._plan_coverage_cache = cached
+        return cached
 
 
 class AppointmentDetailSerializer(AppointmentListSerializer):

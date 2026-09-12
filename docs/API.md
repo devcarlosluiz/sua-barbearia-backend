@@ -411,6 +411,37 @@ assinatura ativa e o serviço está no plano:
 A comissão do barbeiro incide sobre o preço do serviço quando
 `pays_barber_commission` está ligado, mesmo o cliente não pagando no balcão.
 
+#### `plan_coverage` — o plano antes da finalização
+
+Todo agendamento devolvido pela API (agenda, listagem, detalhe, dashboard do
+barbeiro) traz `plan_coverage`: o benefício **antes** de finalizar, para a tela
+do barbeiro não mandar cobrar quem já paga mensalidade.
+
+```json
+"plan_coverage": {
+  "is_subscriber": true,
+  "plan_id": 3,
+  "plan_name": "Barba & Cabelo",
+  "subscription_status": "ACTIVE",
+  "subscription_status_display": "Ativa",
+  "covers_service": true,
+  "is_covered": true,
+  "remaining": 1,
+  "discount_percentage": "0.00",
+  "amount_due": "0.00",
+  "charge_client": false,
+  "label": "Coberto pelo plano Barba & Cabelo"
+}
+```
+
+* `charge_client` / `amount_due` respondem "cobro quanto?" — zero quando a cota
+  cobre, valor já com desconto quando a cota esgotou;
+* `remaining` é `null` quando a cota é ilimitada;
+* o campo é `null` quando não há nada a dizer: cliente sem assinatura viva, ou
+  atendimento já encerrado que não consumiu cota. Um atendimento concluído com
+  cota consumida continua marcado como coberto — a leitura vem do
+  `SubscriptionUsage` gravado, nunca da cota de hoje.
+
 ### Avaliações
 
 | Método | Rota | Acesso | Descrição |

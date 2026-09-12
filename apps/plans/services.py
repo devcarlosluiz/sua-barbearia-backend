@@ -21,6 +21,7 @@ from apps.core.exceptions import BusinessError, ConflictError
 from apps.payments import mercadopago
 from apps.payments.models import PaymentMethod, PaymentProvider
 from apps.plans.models import (
+    LIVE_SUBSCRIPTION_STATUSES,
     BillingType,
     InvoiceStatus,
     Plan,
@@ -157,6 +158,201 @@ def quota_summary(subscription: Subscription) -> list[dict[str, object]]:
             }
         )
     return summary
+
+
+# ---------------------------------------------------------------------------
+# Cobertura exibida no atendimento
+# ---------------------------------------------------------------------------
+def appointment_coverage_map(appointments) -> dict[int, dict[str, object]]:
+    """Como o plano do cliente afeta cada atendimento da lista.
+
+    Separado de `coverage_for` por causa do custo: a agenda do dia tem dezenas
+    de linhas e uma chamada por linha seriam três consultas por atendimento.
+    Aqui a lista inteira sai em três, independentemente do tamanho.
+
+    Devolve `None` para o atendimento sem nada a dizer — cliente sem plano, ou
+    atendimento já encerrado que não consumiu cota.
+    """
+    appointments = [appointment for appointment in appointments if appointment is not None]
+    if not appointments:
+        return {}
+
+    # Um atendimento concluído carrega a própria verdade: o uso gravado na
+    # finalização. Recalcular a cota de hoje diria "coberto" sobre um corte que
+    # o cliente pagou em dinheiro no ciclo passado.
+    usages = {
+        usage.appointment_id: usage
+        for usage in SubscriptionUsage.objects.filter(
+            appointment_id__in=[appointment.pk for appointment in appointments]
+        ).select_related("subscription__plan")
+    }
+
+    pending = [
+        appointment
+        for appointment in appointments
+        if appointment.pk not in usages and not appointment.is_final
+    ]
+    subscriptions: dict[int, Subscription] = {}
+    if pending:
+        subscriptions = {
+            subscription.client_id: subscription
+            for subscription in Subscription.objects.filter(
+                client_id__in={appointment.client_id for appointment in pending},
+                status__in=LIVE_SUBSCRIPTION_STATUSES,
+            )
+            .select_related("plan")
+            .prefetch_related("plan__branches", "plan__plan_services")
+        }
+
+    used = _usage_counts(subscriptions.values())
+
+    coverage_map: dict[int, dict[str, object] | None] = {}
+    for appointment in appointments:
+        usage = usages.get(appointment.pk)
+        if usage is not None:
+            coverage_map[appointment.pk] = _consumed_payload(usage)
+        elif appointment.is_final:
+            coverage_map[appointment.pk] = None
+        else:
+            coverage_map[appointment.pk] = _pending_payload(
+                appointment, subscriptions.get(appointment.client_id), used
+            )
+    return coverage_map
+
+
+def _usage_counts(subscriptions) -> dict[tuple[int, int, date_cls], int]:
+    """Usos por (assinatura, serviço) no ciclo corrente de cada assinatura."""
+    subscriptions = [
+        subscription
+        for subscription in subscriptions
+        if subscription.current_period_start is not None
+    ]
+    if not subscriptions:
+        return {}
+
+    rows = (
+        SubscriptionUsage.objects.filter(
+            subscription_id__in=[subscription.pk for subscription in subscriptions],
+            period_start__in={subscription.current_period_start for subscription in subscriptions},
+        )
+        .values("subscription_id", "service_id", "period_start")
+        .annotate(total=Count("id"))
+    )
+    return {
+        (row["subscription_id"], row["service_id"], row["period_start"]): row["total"]
+        for row in rows
+    }
+
+
+def _consumed_payload(usage: SubscriptionUsage) -> dict[str, object]:
+    """Atendimento que já consumiu uma cota — nada a cobrar, nunca."""
+    plan = usage.subscription.plan
+    return _payload(
+        subscription=usage.subscription,
+        covers_service=True,
+        is_covered=True,
+        remaining=None,
+        discount_percentage=Decimal("0.00"),
+        amount_due=Decimal("0.00"),
+        label=f"Coberto pelo plano {plan.name}",
+    )
+
+
+def _pending_payload(appointment, subscription, used) -> dict[str, object] | None:
+    """Benefício de um atendimento que ainda vai ser cobrado."""
+    if subscription is None:
+        return None
+
+    plan = subscription.plan
+    price = Decimal(appointment.price)
+    full_price = {
+        "subscription": subscription,
+        "covers_service": False,
+        "is_covered": False,
+        "remaining": None,
+        "discount_percentage": Decimal("0.00"),
+        "amount_due": price,
+    }
+
+    if not subscription.grants_benefit:
+        return _payload(
+            **full_price,
+            label=f"Plano {plan.name} sem benefício ativo ({subscription.get_status_display()})",
+        )
+    if not plan.covers_branch(appointment.branch_id):
+        return _payload(**full_price, label=f"O plano {plan.name} não vale nesta filial")
+
+    plan_service = next(
+        (item for item in plan.plan_services.all() if item.service_id == appointment.service_id),
+        None,
+    )
+    if plan_service is None:
+        return _payload(**full_price, label=f"O plano {plan.name} não cobre este serviço")
+
+    remaining = None
+    if not plan_service.is_unlimited:
+        consumed = used.get(
+            (subscription.pk, plan_service.service_id, subscription.current_period_start), 0
+        )
+        remaining = max(plan_service.monthly_quota - consumed, 0)
+
+    if remaining is None or remaining > 0:
+        return _payload(
+            subscription=subscription,
+            covers_service=True,
+            is_covered=True,
+            remaining=remaining,
+            discount_percentage=Decimal("0.00"),
+            amount_due=Decimal("0.00"),
+            label=f"Coberto pelo plano {plan.name}",
+        )
+
+    # Cota esgotada: o cliente paga, com o desconto do plano se houver.
+    discount = plan.overage_discount_percentage
+    amount_due = price - (price * discount / Decimal("100")).quantize(Decimal("0.01"))
+    label = "Cota do plano esgotada neste ciclo"
+    if discount > 0:
+        label = f"{label} — {discount:.0f}% de desconto"
+    return _payload(
+        subscription=subscription,
+        covers_service=True,
+        is_covered=False,
+        remaining=0,
+        discount_percentage=discount,
+        amount_due=amount_due,
+        label=label,
+    )
+
+
+def _payload(
+    *,
+    subscription: Subscription,
+    covers_service: bool,
+    is_covered: bool,
+    remaining: int | None,
+    discount_percentage: Decimal,
+    amount_due: Decimal,
+    label: str,
+) -> dict[str, object]:
+    """Formato único do campo `plan_coverage` do agendamento.
+
+    Os decimais saem como string pelo mesmo motivo que no resto da API: o app
+    não deve arredondar dinheiro em ponto flutuante.
+    """
+    return {
+        "is_subscriber": True,
+        "plan_id": subscription.plan_id,
+        "plan_name": subscription.plan.name,
+        "subscription_status": subscription.status,
+        "subscription_status_display": subscription.get_status_display(),
+        "covers_service": covers_service,
+        "is_covered": is_covered,
+        "remaining": remaining,
+        "discount_percentage": f"{Decimal(discount_percentage):.2f}",
+        "amount_due": f"{Decimal(amount_due):.2f}",
+        "charge_client": Decimal(amount_due) > 0,
+        "label": label,
+    }
 
 
 # ---------------------------------------------------------------------------
