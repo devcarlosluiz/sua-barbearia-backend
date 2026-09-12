@@ -397,6 +397,35 @@ precisa para pagar:
 Com `billing_type: "CARD_RECURRING"` o `open_invoice` traz `checkout_url` em vez
 do QR — o app abre essa URL e o cartão é informado no Mercado Pago.
 
+#### Quando a assinatura ativa
+
+Três caminhos, nessa ordem de rapidez:
+
+1. **Consulta à fatura recém-emitida** — ao gerar o QR, o backend agenda
+   `plans.poll_pix_invoice`, que pergunta ao Mercado Pago a cada
+   `SUBSCRIPTION_PIX_POLL_INTERVAL_SECONDS` (15s) por até
+   `SUBSCRIPTION_PIX_POLL_ATTEMPTS` tentativas (40 = 10 min). Para sozinha
+   assim que a fatura resolve. É o que faz o plano ativar com o cliente ainda
+   olhando para o app — inclusive em desenvolvimento, onde o webhook não
+   alcança `localhost`.
+2. **Webhook** — `POST /webhooks/mercadopago/`, o caminho normal em produção.
+3. **Varredura de 20 em 20 minutos** (`plans.sync_subscription_payments`) — rede
+   de segurança para webhook perdido. Só cobre PIX.
+
+O app pode simplesmente consultar `GET /subscriptions/me/` enquanto a tela do QR
+estiver aberta: quando `grants_benefit` virar `true`, o plano ativou.
+
+Para forçar a sincronização à mão (fatura antiga, ou o cliente pagou depois do
+QR vencer):
+
+```bash
+docker compose exec backend python manage.py shell -c \
+  "from apps.plans.services import sync_pending_invoices; print(sync_pending_invoices())"
+```
+
+Se a fatura já estiver `EXPIRED`, o sync não a pega mais — aí é confirmação
+manual do proprietário: `POST /subscription-invoices/{id}/confirm/`.
+
 #### Como o plano afeta o atendimento
 
 Na finalização (`POST /appointments/{id}/complete/`), se o cliente tem

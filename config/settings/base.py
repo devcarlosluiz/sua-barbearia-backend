@@ -390,6 +390,12 @@ SUBSCRIPTION_SETTINGS = {
     "PIX_RENEWAL_LEAD_DAYS": env.int("SUBSCRIPTION_PIX_RENEWAL_LEAD_DAYS", default=5),
     # Dias de tolerância após o vencimento antes de suspender o benefício.
     "GRACE_PERIOD_DAYS": env.int("SUBSCRIPTION_GRACE_PERIOD_DAYS", default=3),
+    # Consulta ao provedor logo depois de emitir o QR, para o plano ativar
+    # enquanto o cliente ainda está com o app aberto. O padrão cobre os 10
+    # primeiros minutos; depois disso a varredura de 20 em 20 minutos assume.
+    # `0` tentativas desliga a consulta e deixa tudo por conta do webhook.
+    "PIX_POLL_INTERVAL_SECONDS": env.int("SUBSCRIPTION_PIX_POLL_INTERVAL_SECONDS", default=15),
+    "PIX_POLL_ATTEMPTS": env.int("SUBSCRIPTION_PIX_POLL_ATTEMPTS", default=40),
 }
 
 # ---------------------------------------------------------------------------

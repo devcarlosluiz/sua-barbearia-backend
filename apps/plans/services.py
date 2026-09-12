@@ -458,7 +458,7 @@ def issue_pix_invoice(subscription: Subscription, *, period_start: date_cls) -> 
         expires_in_minutes=minutes,
     )
 
-    return SubscriptionInvoice.objects.create(
+    invoice = SubscriptionInvoice.objects.create(
         subscription=subscription,
         period_start=start,
         period_end=end,
@@ -474,6 +474,32 @@ def issue_pix_invoice(subscription: Subscription, *, period_start: date_cls) -> 
         expires_at=timezone.now() + timezone.timedelta(minutes=minutes),
         provider_payload=charge.payload,
     )
+    schedule_payment_poll(invoice)
+    return invoice
+
+
+def schedule_payment_poll(invoice: SubscriptionInvoice) -> None:
+    """Enfileira a consulta ao provedor para a fatura recém-emitida.
+
+    O webhook continua sendo o caminho principal, mas ele não cobre tudo: em
+    desenvolvimento o Mercado Pago não alcança `localhost`, e em produção uma
+    entrega pode atrasar ou se perder. Sem isto, o cliente paga e fica olhando
+    para um plano inativo até a varredura de 20 em 20 minutos passar.
+
+    Consulta só esta fatura, e por tempo limitado — varrer todas as faturas
+    abertas a cada 15 segundos cresceria com a base de assinantes e bateria no
+    limite de requisições do provedor.
+    """
+    from apps.plans.tasks import poll_pix_invoice
+
+    attempts = _config("PIX_POLL_ATTEMPTS")
+    if attempts <= 0:
+        return
+
+    interval = _config("PIX_POLL_INTERVAL_SECONDS")
+    # `on_commit`: enfileirar antes do commit deixaria o worker procurar uma
+    # fatura que ainda não existe para ele.
+    transaction.on_commit(lambda: poll_pix_invoice.apply_async((invoice.pk, 1), countdown=interval))
 
 
 # ---------------------------------------------------------------------------
@@ -722,6 +748,35 @@ def suspend_overdue_subscriptions(*, today: date_cls | None = None) -> dict[str,
     return {"past_due": past_due, "expired": expired}
 
 
+def sync_invoice(invoice: SubscriptionInvoice) -> str:
+    """Pergunta ao provedor o que houve com uma cobrança PIX e age.
+
+    Devolve o desfecho — `confirmed`, `expired`, `pending` ou `skipped` — para
+    quem chamou saber se ainda vale perguntar de novo.
+    """
+    if invoice.status != InvoiceStatus.PENDING or not invoice.external_id:
+        return "skipped"
+
+    client = mercadopago.get_client()
+    if not client.is_configured:
+        return "skipped"
+
+    try:
+        data = client.get_payment(invoice.external_id)
+    except BusinessError:
+        # Instabilidade do provedor não é resposta: a próxima tentativa decide.
+        return "pending"
+
+    status = str(data.get("status", ""))
+    if status == "approved":
+        confirm_invoice(invoice, provider_payload=data)
+        return "confirmed"
+    if status in ("cancelled", "rejected", "expired"):
+        SubscriptionInvoice.objects.filter(pk=invoice.pk).update(status=InvoiceStatus.EXPIRED)
+        return "expired"
+    return "pending"
+
+
 def sync_pending_invoices(*, limit: int = 100) -> dict[str, int]:
     """Rede de segurança para webhook perdido: consulta o provedor."""
     invoices = (
@@ -734,24 +789,15 @@ def sync_pending_invoices(*, limit: int = 100) -> dict[str, int]:
         .select_related("subscription__plan", "subscription__client__user")[:limit]
     )
 
-    client = mercadopago.get_client()
-    if not client.is_configured:
+    if not mercadopago.get_client().is_configured:
         return {"checked": 0, "confirmed": 0}
 
     confirmed = 0
     checked = 0
     for invoice in invoices:
         checked += 1
-        try:
-            data = client.get_payment(invoice.external_id)
-        except BusinessError:
-            continue
-        status = str(data.get("status", ""))
-        if status == "approved":
-            confirm_invoice(invoice, provider_payload=data)
+        if sync_invoice(invoice) == "confirmed":
             confirmed += 1
-        elif status in ("cancelled", "rejected", "expired"):
-            SubscriptionInvoice.objects.filter(pk=invoice.pk).update(status=InvoiceStatus.EXPIRED)
 
     return {"checked": checked, "confirmed": confirmed}
 
