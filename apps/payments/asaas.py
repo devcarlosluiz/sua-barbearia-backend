@@ -288,6 +288,9 @@ class AsaasClient:
         headers = {
             "access_token": self._api_key,
             "Content-Type": "application/json",
+            # Obrigatório para contas Asaas criadas a partir de 13/06/2024;
+            # sem isto a API recusa a chamada com 401.
+            "User-Agent": "Sua Barbearia",
         }
 
         try:

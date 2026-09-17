@@ -7,6 +7,7 @@ Nunca coloque SECRET_KEY, senhas ou chaves de API diretamente neste arquivo.
 
 from __future__ import annotations
 
+import os
 from datetime import timedelta
 from pathlib import Path
 
@@ -372,8 +373,14 @@ FIREBASE_CREDENTIALS_JSON = env("FIREBASE_CREDENTIALS_JSON", default="")
 # Todos os segredos vêm do ambiente. Sem `ASAAS_API_KEY` a assinatura online
 # simplesmente não é oferecida — o restante do sistema continua funcionando,
 # inclusive a confirmação manual de fatura no caixa.
-ASAAS_API_KEY = env("ASAAS_API_KEY", default="")
-# Produção: https://api.asaas.com/v3 — sandbox: https://sandbox.asaas.com/api/v3
+#
+# Lido direto de `os.environ`, sem passar por `env()`: toda chave do Asaas
+# começa com `$` (`$aact_prod_...`/`$aact_hmlg_...`), e o django-environ trata
+# um valor começado por `$` como REFERÊNCIA a outra variável de ambiente — o
+# mesmo comportamento documentado para `SECRET_KEY` no `.env.example`. Sem
+# este desvio, `ASAAS_API_KEY` viraria silenciosamente uma string vazia.
+ASAAS_API_KEY = os.environ.get("ASAAS_API_KEY", "")
+# Produção: https://api.asaas.com/v3 — sandbox: https://api-sandbox.asaas.com/v3
 ASAAS_BASE_URL = env("ASAAS_BASE_URL", default="https://api.asaas.com/v3")
 # Token estático configurado ao cadastrar o webhook no painel do Asaas. Sem
 # ele o endpoint recusa as chamadas em produção, para não aceitar confirmação
