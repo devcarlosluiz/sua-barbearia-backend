@@ -6,7 +6,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from apps.plans.views import (
-    MercadoPagoWebhookView,
+    AsaasWebhookView,
     PlanViewSet,
     SubscriptionInvoiceViewSet,
     SubscriptionViewSet,
@@ -21,9 +21,9 @@ router.register(
 
 urlpatterns = [
     path(
-        "webhooks/mercado-pago/",
-        MercadoPagoWebhookView.as_view(),
-        name="mercado-pago-webhook",
+        "webhooks/asaas/",
+        AsaasWebhookView.as_view(),
+        name="asaas-webhook",
     ),
     path("", include(router.urls)),
 ]

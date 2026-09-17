@@ -329,10 +329,9 @@ Movimentações aceitas: `ENTRY`, `ADJUSTMENT` (informa o saldo final contado),
 
 ### Planos mensais e assinaturas
 
-O cliente assina um plano e paga direto no app. O gateway é o **Mercado Pago**:
-PIX gera QR a cada ciclo; cartão usa assinatura recorrente (`preapproval`) com
-checkout hospedado pelo provedor — nem o app nem o backend recebem dados de
-cartão.
+O cliente assina um plano e paga direto no app. O gateway é o **Asaas**:
+PIX gera QR a cada ciclo; cartão usa assinatura recorrente com fatura
+hospedada pelo provedor — nem o app nem o backend recebem dados de cartão.
 
 | Método | Rota | Acesso | Descrição |
 |---|---|---|---|
@@ -348,7 +347,7 @@ cartão.
 | POST | `/subscriptions/{id}/renew-pix/` | O C | Reemite o QR do ciclo em aberto |
 | GET | `/subscription-invoices/` | O C | Faturas (cliente vê só as próprias) |
 | POST | `/subscription-invoices/{id}/confirm/` | O | Confirma pagamento no caixa |
-| POST | `/webhooks/mercado-pago/` | — | Notificação do provedor (HMAC) |
+| POST | `/webhooks/asaas/` | — | Notificação do provedor (token estático) |
 
 #### Composição do plano
 
@@ -395,20 +394,20 @@ precisa para pagar:
 ```
 
 Com `billing_type: "CARD_RECURRING"` o `open_invoice` traz `checkout_url` em vez
-do QR — o app abre essa URL e o cartão é informado no Mercado Pago.
+do QR — o app abre essa URL e o cartão é informado na fatura do Asaas.
 
 #### Quando a assinatura ativa
 
 Três caminhos, nessa ordem de rapidez:
 
 1. **Consulta à fatura recém-emitida** — ao gerar o QR, o backend agenda
-   `plans.poll_pix_invoice`, que pergunta ao Mercado Pago a cada
+   `plans.poll_pix_invoice`, que pergunta ao Asaas a cada
    `SUBSCRIPTION_PIX_POLL_INTERVAL_SECONDS` (15s) por até
    `SUBSCRIPTION_PIX_POLL_ATTEMPTS` tentativas (40 = 10 min). Para sozinha
    assim que a fatura resolve. É o que faz o plano ativar com o cliente ainda
    olhando para o app — inclusive em desenvolvimento, onde o webhook não
    alcança `localhost`.
-2. **Webhook** — `POST /webhooks/mercadopago/`, o caminho normal em produção.
+2. **Webhook** — `POST /webhooks/asaas/`, o caminho normal em produção.
 3. **Varredura de 20 em 20 minutos** (`plans.sync_subscription_payments`) — rede
    de segurança para webhook perdido. Só cobre PIX.
 
@@ -624,7 +623,7 @@ navegador continuaria exibindo a logo anterior.
 | `INVOICE_ALREADY_PAID` | 400 | Fatura já quitada |
 | `INVOICE_NOT_PAYABLE` | 400 | Fatura cancelada ou estornada |
 | `CLIENT_PROFILE_REQUIRED` | 403 | Só clientes assinam |
-| `GATEWAY_NOT_CONFIGURED` | 503 | Falta credencial do Mercado Pago |
+| `GATEWAY_NOT_CONFIGURED` | 503 | Falta credencial do Asaas |
 | `GATEWAY_ERROR` | 502 | Provedor indisponível ou recusou |
 
 ### Genéricos

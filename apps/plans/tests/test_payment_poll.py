@@ -2,7 +2,7 @@
 
 O webhook é o caminho principal, mas ele não chega em desenvolvimento e pode
 atrasar em produção — e o cliente, que acabou de pagar, fica olhando para um
-plano inativo. Estes testes protegem o outro caminho: perguntar ao Mercado Pago
+plano inativo. Estes testes protegem o outro caminho: perguntar ao Asaas
 de poucos em poucos segundos enquanto a cobrança recém-emitida segue em aberto.
 """
 
@@ -36,7 +36,7 @@ def invoice(client_profile, plan, fake_gateway):
 
 class TestConsultaDaFatura:
     def test_pix_pago_ativa_a_assinatura(self, polling, invoice, fake_gateway):
-        fake_gateway.payment_status = "approved"
+        fake_gateway.payment_status = "CONFIRMED"
 
         result = poll_pix_invoice(invoice.pk)
 
@@ -48,7 +48,7 @@ class TestConsultaDaFatura:
         assert invoice.subscription.grants_benefit is True
 
     def test_pix_em_aberto_agenda_a_proxima_consulta(self, polling, invoice, fake_gateway):
-        fake_gateway.payment_status = "pending"
+        fake_gateway.payment_status = "PENDING"
 
         result = poll_pix_invoice(invoice.pk, 1)
 
@@ -60,7 +60,7 @@ class TestConsultaDaFatura:
         assert invoice.status == InvoiceStatus.PENDING
 
     def test_para_na_ultima_tentativa(self, polling, invoice, fake_gateway):
-        fake_gateway.payment_status = "pending"
+        fake_gateway.payment_status = "PENDING"
 
         result = poll_pix_invoice(invoice.pk, 3)
 
@@ -68,7 +68,7 @@ class TestConsultaDaFatura:
         assert len(fake_gateway.called("get_payment")) == 1
 
     def test_pix_recusado_encerra_a_cobranca(self, polling, invoice, fake_gateway):
-        fake_gateway.payment_status = "rejected"
+        fake_gateway.payment_status = "OVERDUE"
 
         assert poll_pix_invoice(invoice.pk)["outcome"] == "expired"
         invoice.refresh_from_db()
@@ -95,7 +95,7 @@ class TestAgendamentoNaEmissao:
         self, polling, django_capture_on_commit_callbacks, client_profile, plan, fake_gateway
     ):
         """Sem isto, nada acompanha o pagamento até a varredura de 20 minutos."""
-        fake_gateway.payment_status = "approved"
+        fake_gateway.payment_status = "CONFIRMED"
 
         with django_capture_on_commit_callbacks(execute=True):
             subscription = subscribe(client=client_profile, plan=plan, billing_type="PIX_MONTHLY")
@@ -112,7 +112,7 @@ class TestAgendamentoNaEmissao:
             **settings.SUBSCRIPTION_SETTINGS,
             "PIX_POLL_ATTEMPTS": 0,
         }
-        fake_gateway.payment_status = "approved"
+        fake_gateway.payment_status = "CONFIRMED"
 
         with django_capture_on_commit_callbacks(execute=True):
             subscription = subscribe(client=client_profile, plan=plan, billing_type="PIX_MONTHLY")

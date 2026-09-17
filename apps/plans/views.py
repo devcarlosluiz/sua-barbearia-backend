@@ -203,8 +203,8 @@ class SubscriptionViewSet(
     def subscribe(self, request: Request) -> Response:
         """Cria a assinatura e devolve os dados de pagamento do 1º ciclo.
 
-        PIX vem com QR pronto; cartão vem com `checkout_url` — a página do
-        Mercado Pago onde o cliente informa o cartão. O app nunca coleta
+        PIX vem com QR pronto; cartão vem com `checkout_url` — a fatura
+        hospedada do Asaas onde o cliente informa o cartão. O app nunca coleta
         número, validade ou CVV.
         """
         client = _client_of(request)
@@ -358,19 +358,19 @@ class SubscriptionInvoiceViewSet(
 
 @extend_schema(
     tags=["Assinaturas"],
-    summary="Webhook do Mercado Pago",
+    summary="Webhook do Asaas",
     description=(
-        "Endpoint público chamado pelo Mercado Pago. A autenticidade é "
-        "verificada pela assinatura HMAC no header `x-signature`."
+        "Endpoint público chamado pelo Asaas. A autenticidade é verificada "
+        "pelo token estático no header `asaas-access-token`."
     ),
     request=None,
     responses={200: None},
 )
-class MercadoPagoWebhookView(APIView):
-    """Notificações de pagamento e assinatura.
+class AsaasWebhookView(APIView):
+    """Notificações de pagamento.
 
     Fica fora da autenticação por JWT de propósito: quem chama é o provedor.
-    A defesa é a assinatura HMAC — nunca o corpo da requisição.
+    A defesa é o token do webhook — nunca o corpo da requisição.
     """
 
     permission_classes = [AllowAny]
@@ -379,27 +379,22 @@ class MercadoPagoWebhookView(APIView):
 
     def post(self, request: Request) -> Response:
         body = request.data if isinstance(request.data, dict) else {}
-        topic = str(body.get("type") or body.get("topic") or "")
-        data_id = str((body.get("data") or {}).get("id") or body.get("data.id") or "")
+        event = str(body.get("event") or "")
+        payment = body.get("payment") if isinstance(body.get("payment"), dict) else {}
 
-        signature = request.headers.get("x-signature", "")
-        request_id = request.headers.get("x-request-id", "")
+        token = request.headers.get("asaas-access-token", "")
 
-        if not signature_is_valid(
-            signature_header=signature, request_id=request_id, data_id=data_id
-        ):
-            # Não revelamos se o problema foi segredo ausente ou HMAC inválido.
-            logger.warning(
-                "Webhook do Mercado Pago recusado: assinatura invalida (topico=%s)", topic
-            )
-            return Response({"detail": "Assinatura inválida."}, status=status.HTTP_401_UNAUTHORIZED)
+        if not signature_is_valid(token=token):
+            # Não revelamos se o problema foi segredo ausente ou token inválido.
+            logger.warning("Webhook do Asaas recusado: token invalido (evento=%s)", event)
+            return Response({"detail": "Token inválido."}, status=status.HTTP_401_UNAUTHORIZED)
 
         try:
-            result = handle_notification(topic=topic, data_id=data_id)
+            result = handle_notification(event=event, payment=payment)
         except BusinessError as error:
             # Devolver 5xx faz o provedor reentregar, que é o que queremos
             # quando a falha é nossa (ou do próprio provedor).
-            logger.warning("Webhook %s falhou: %s", topic, error.detail)
+            logger.warning("Webhook %s falhou: %s", event, error.detail)
             return Response(
                 {"detail": "Não foi possível processar agora."},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,

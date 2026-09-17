@@ -1,8 +1,8 @@
 """Fixtures das assinaturas.
 
-Nenhum teste toca a rede: `fake_gateway` substitui o cliente do Mercado Pago
-por um duplo que grava as chamadas recebidas e devolve as mesmas estruturas da
-API real (`point_of_interaction.transaction_data`, `init_point`, `status`).
+Nenhum teste toca a rede: `fake_gateway` substitui o cliente do Asaas por um
+duplo que grava as chamadas recebidas e devolve as mesmas estruturas da API
+real (`pixQrCode`, `invoiceUrl`, `status`).
 """
 
 from __future__ import annotations
@@ -12,37 +12,36 @@ from typing import Any
 
 import pytest
 
-from apps.payments import mercadopago
-from apps.payments.mercadopago import PixCharge, Preapproval
+from apps.payments import asaas
+from apps.payments.asaas import CardSubscription, PixCharge
 from apps.plans.models import Plan, PlanService
 
-WEBHOOK_SECRET = "segredo-de-teste"
+WEBHOOK_TOKEN = "segredo-de-teste"
 
 
-class FakeMercadoPago:
+class FakeAsaas:
     """Duplo do gateway, controlável pelo teste."""
 
     def __init__(self) -> None:
         self.is_configured = True
         self.calls: list[tuple[str, dict[str, Any]]] = []
         #: Status devolvido por `get_payment`, ajustável pelo teste.
-        self.payment_status = "pending"
-        self.preapproval_status = "pending"
-        self.authorized_payment_status = "processed"
+        self.payment_status = "PENDING"
         self.next_payment_id = "pay-1"
-        self.cancelled_preapprovals: list[str] = []
+        self.next_cycle_payment_id = "pay-2"
+        self.cancelled_subscriptions: list[str] = []
 
     # --- PIX ---
     def create_pix_payment(self, **kwargs: Any) -> PixCharge:
         self.calls.append(("create_pix_payment", kwargs))
         return PixCharge(
             external_id=self.next_payment_id,
-            status="pending",
+            status="PENDING",
             qr_code="00020126...br.gov.bcb.pix",
             qr_code_base64="aGVsbG8=",
-            ticket_url="https://mp.test/ticket/pay-1",
+            ticket_url="https://asaas.test/i/pay-1",
             expires_at=None,
-            payload={"id": self.next_payment_id, "status": "pending"},
+            payload={"id": self.next_payment_id, "status": "PENDING"},
         )
 
     def get_payment(self, payment_id: str) -> dict[str, Any]:
@@ -51,48 +50,39 @@ class FakeMercadoPago:
 
     def refund_payment(self, payment_id: str, amount: Decimal | None = None) -> dict[str, Any]:
         self.calls.append(("refund_payment", {"payment_id": payment_id}))
-        return {"id": payment_id, "status": "refunded"}
+        return {"id": payment_id, "status": "REFUNDED"}
 
     # --- Cartão recorrente ---
-    def create_preapproval(self, **kwargs: Any) -> Preapproval:
-        self.calls.append(("create_preapproval", kwargs))
-        return Preapproval(
-            external_id="preapp-1",
-            status="pending",
-            init_point="https://mp.test/checkout/preapp-1",
-            payload={"id": "preapp-1", "status": "pending"},
+    def create_card_subscription(self, **kwargs: Any) -> CardSubscription:
+        self.calls.append(("create_card_subscription", kwargs))
+        return CardSubscription(
+            external_id="sub-1",
+            status="ACTIVE",
+            checkout_url="https://asaas.test/i/pay-1",
+            first_payment_id="pay-1",
+            payload={"id": "sub-1", "status": "ACTIVE"},
         )
 
-    def get_preapproval(self, preapproval_id: str) -> dict[str, Any]:
-        self.calls.append(("get_preapproval", {"preapproval_id": preapproval_id}))
-        return {"id": preapproval_id, "status": self.preapproval_status}
+    def get_subscription(self, subscription_id: str) -> dict[str, Any]:
+        self.calls.append(("get_subscription", {"subscription_id": subscription_id}))
+        return {"id": subscription_id, "status": "ACTIVE"}
 
-    def cancel_preapproval(self, preapproval_id: str) -> dict[str, Any]:
-        self.cancelled_preapprovals.append(preapproval_id)
-        self.calls.append(("cancel_preapproval", {"preapproval_id": preapproval_id}))
-        return {"id": preapproval_id, "status": "cancelled"}
-
-    def get_authorized_payment(self, authorized_payment_id: str) -> dict[str, Any]:
-        self.calls.append(
-            ("get_authorized_payment", {"authorized_payment_id": authorized_payment_id})
-        )
-        return {
-            "id": authorized_payment_id,
-            "status": self.authorized_payment_status,
-            "preapproval_id": "preapp-1",
-        }
+    def cancel_subscription(self, subscription_id: str) -> dict[str, Any]:
+        self.cancelled_subscriptions.append(subscription_id)
+        self.calls.append(("cancel_subscription", {"subscription_id": subscription_id}))
+        return {"id": subscription_id, "deleted": True}
 
     def called(self, name: str) -> list[dict[str, Any]]:
         return [payload for call, payload in self.calls if call == name]
 
 
 @pytest.fixture
-def fake_gateway(monkeypatch, settings) -> FakeMercadoPago:
+def fake_gateway(monkeypatch, settings) -> FakeAsaas:
     """Injeta o duplo no único ponto de construção do cliente."""
-    settings.MERCADO_PAGO_ACCESS_TOKEN = "TEST-token"
-    settings.MERCADO_PAGO_WEBHOOK_SECRET = WEBHOOK_SECRET
-    gateway = FakeMercadoPago()
-    monkeypatch.setattr(mercadopago, "get_client", lambda: gateway)
+    settings.ASAAS_API_KEY = "TEST-key"
+    settings.ASAAS_WEBHOOK_TOKEN = WEBHOOK_TOKEN
+    gateway = FakeAsaas()
+    monkeypatch.setattr(asaas, "get_client", lambda: gateway)
     return gateway
 
 

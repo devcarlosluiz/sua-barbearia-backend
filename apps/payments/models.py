@@ -1,8 +1,9 @@
 """Pagamentos.
 
 A modelagem é agnóstica de gateway: `provider` + `external_id` + `payload`
-permitem plugar Mercado Pago, Stripe, Asaas ou PIX no futuro sem migração
-destrutiva. Hoje o provider padrão é MANUAL (registro no caixa).
+permitem plugar outros provedores no futuro sem migração destrutiva. Hoje o
+provider padrão é MANUAL (registro no caixa); o pagamento online (planos
+mensais) é feito exclusivamente pelo Asaas.
 """
 
 from __future__ import annotations
@@ -37,7 +38,6 @@ class PaymentStatus(models.TextChoices):
 
 class PaymentProvider(models.TextChoices):
     MANUAL = "MANUAL", _("Manual / caixa")
-    MERCADO_PAGO = "MERCADO_PAGO", _("Mercado Pago")
     STRIPE = "STRIPE", _("Stripe")
     ASAAS = "ASAAS", _("Asaas")
 

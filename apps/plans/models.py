@@ -10,7 +10,7 @@ Modelagem em quatro peças:
   ou a referência da assinatura recorrente no gateway.
 * `SubscriptionUsage` — consumo da cota, um registro por atendimento coberto.
 
-Nada aqui fala com o Mercado Pago: os campos `provider` / `external_id` /
+Nada aqui fala com o Asaas: os campos `provider` / `external_id` /
 `provider_payload` seguem o mesmo padrão agnóstico já usado em `payments`.
 """
 
@@ -156,7 +156,7 @@ class BillingType(models.TextChoices):
 class Subscription(BaseModel):
     """Assinatura de um plano por um cliente.
 
-    O Mercado Pago só faz cobrança recorrente automática no cartão; por isso o
+    O Asaas só faz cobrança recorrente automática no cartão; por isso o
     PIX é modelado como uma cobrança nova a cada ciclo (`PIX_MONTHLY`).
     """
 
@@ -208,7 +208,7 @@ class Subscription(BaseModel):
         max_length=120,
         blank=True,
         db_index=True,
-        help_text=_("`preapproval_id` no Mercado Pago, quando a cobrança é recorrente."),
+        help_text=_("Id da assinatura no Asaas, quando a cobrança é recorrente."),
     )
     provider_payload = models.JSONField(_("retorno do provedor"), default=dict, blank=True)
 

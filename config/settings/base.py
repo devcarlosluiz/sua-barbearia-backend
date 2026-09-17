@@ -367,21 +367,18 @@ FIREBASE_PROJECT_ID = env("FIREBASE_PROJECT_ID", default="")
 FIREBASE_CREDENTIALS_JSON = env("FIREBASE_CREDENTIALS_JSON", default="")
 
 # ---------------------------------------------------------------------------
-# Mercado Pago (planos mensais)
+# Asaas (planos mensais)
 # ---------------------------------------------------------------------------
-# Todos os segredos vêm do ambiente. Sem `MERCADO_PAGO_ACCESS_TOKEN` a
-# assinatura online simplesmente não é oferecida — o restante do sistema
-# continua funcionando, inclusive a confirmação manual de fatura no caixa.
-MERCADO_PAGO_ACCESS_TOKEN = env("MERCADO_PAGO_ACCESS_TOKEN", default="")
-# A chave pública não é segredo: é usada pelo checkout do próprio provedor.
-MERCADO_PAGO_PUBLIC_KEY = env("MERCADO_PAGO_PUBLIC_KEY", default="")
-# Segredo da assinatura dos webhooks. Sem ele o endpoint recusa as chamadas em
-# produção, para não aceitar confirmação de pagamento de qualquer origem.
-MERCADO_PAGO_WEBHOOK_SECRET = env("MERCADO_PAGO_WEBHOOK_SECRET", default="")
-# URL pública que o provedor chama ao mudar o status de um pagamento.
-MERCADO_PAGO_NOTIFICATION_URL = env("MERCADO_PAGO_NOTIFICATION_URL", default="")
-# Para onde o cliente volta após informar o cartão no checkout do provedor.
-MERCADO_PAGO_BACK_URL = env("MERCADO_PAGO_BACK_URL", default="")
+# Todos os segredos vêm do ambiente. Sem `ASAAS_API_KEY` a assinatura online
+# simplesmente não é oferecida — o restante do sistema continua funcionando,
+# inclusive a confirmação manual de fatura no caixa.
+ASAAS_API_KEY = env("ASAAS_API_KEY", default="")
+# Produção: https://api.asaas.com/v3 — sandbox: https://sandbox.asaas.com/api/v3
+ASAAS_BASE_URL = env("ASAAS_BASE_URL", default="https://api.asaas.com/v3")
+# Token estático configurado ao cadastrar o webhook no painel do Asaas. Sem
+# ele o endpoint recusa as chamadas em produção, para não aceitar confirmação
+# de pagamento de qualquer origem.
+ASAAS_WEBHOOK_TOKEN = env("ASAAS_WEBHOOK_TOKEN", default="")
 
 SUBSCRIPTION_SETTINGS = {
     # Validade do QR do PIX, em minutos.

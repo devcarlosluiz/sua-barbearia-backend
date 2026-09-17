@@ -23,9 +23,9 @@ Pillow>=11.0,<12.0
 python-dateutil>=2.9,<3.0
 
 # ---- Integrações ----
-# Cliente HTTP do Mercado Pago (apps/payments/mercadopago.py). O SDK oficial
-# não é usado: a superfície que consumimos são 5 endpoints REST, e um wrapper
-# próprio mantém timeouts, idempotência e mascaramento de segredo sob controle.
+# Cliente HTTP do Asaas (apps/payments/asaas.py). O SDK oficial não é usado:
+# a superfície que consumimos é um punhado de endpoints REST, e um wrapper
+# próprio mantém timeouts e mascaramento de segredo sob controle.
 requests>=2.32,<3.0
 
 # Verificação local do ID token do "Entrar com o Google" (apps/accounts/google.py).

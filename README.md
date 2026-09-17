@@ -204,7 +204,7 @@ Copie `.env.example` para `.env`. Nunca versione o `.env`.
 | `JWT_REFRESH_LIFETIME` | Validade do refresh token (dias) |
 | `GOOGLE_OAUTH_CLIENT_IDS` | Client IDs aceitos em `/auth/google/` (Android, iOS, Web) |
 | `EMAIL_*` | Envio de e-mail (dev usa o backend de console) |
-| `MERCADO_PAGO_*` | Planos mensais (checkout e webhook) |
+| `ASAAS_*` | Planos mensais (checkout e webhook) |
 | `FIREBASE_PROJECT_ID` | Push notification (opcional) |
 | `SENTRY_DSN` | Observabilidade (opcional) |
 | `SEED_DEFAULT_PASSWORD` | Senha dos usuários do seed (dev) |

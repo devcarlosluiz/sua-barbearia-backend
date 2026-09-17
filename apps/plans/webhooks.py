@@ -1,167 +1,122 @@
-"""Recepção de webhooks do Mercado Pago.
+"""Recepção de webhooks do Asaas.
 
 O endpoint é público por natureza — quem chama é o provedor, não um usuário
-autenticado. Por isso a autenticidade vem da assinatura HMAC que o Mercado
-Pago envia no header `x-signature`, no formato:
+autenticado. Por isso a autenticidade vem de um token estático, o mesmo
+configurado ao cadastrar o webhook no painel do Asaas, que o provedor devolve
+em toda chamada no header:
 
-    x-signature: ts=1704908010,v1=<hmac_sha256>
-    x-request-id: <uuid>
+    asaas-access-token: <token>
 
-O manifesto assinado é `id:<data.id>;request-id:<x-request-id>;ts:<ts>;`.
+Não é uma assinatura HMAC sobre o corpo — é comparação direta do token, por
+isso a checagem usa `hmac.compare_digest` só para não vazar informação por
+tempo de resposta.
 
 Regras que valem aqui:
 
-* **Sem segredo configurado a requisição é recusada** (503). Aceitar webhook
-  não assinado deixaria qualquer um marcar fatura como paga.
-* A confirmação **nunca** confia no corpo recebido: usa o `id` para consultar
-  o provedor e decidir pelo status que ele responde.
-* O processamento é idempotente — o Mercado Pago reentrega.
+* **Sem token configurado a requisição é recusada** (503 na prática vira 401
+  aqui). Aceitar webhook sem token deixaria qualquer um marcar fatura como
+  paga.
+* O corpo da notificação já traz o pagamento (`payment`) com o status atual,
+  sem exigir uma segunda consulta ao provedor; o `provider_payload` gravado é
+  sempre o que o webhook enviou.
+* O processamento é idempotente — o Asaas reentrega notificações.
 """
 
 from __future__ import annotations
 
-import hashlib
 import hmac
 import logging
 from typing import Any
 
 from django.conf import settings
 
-from apps.plans.models import InvoiceStatus, SubscriptionInvoice, SubscriptionStatus
+from apps.plans.models import InvoiceStatus, SubscriptionInvoice
 
 logger = logging.getLogger("suabarbearia.application")
 
+#: Eventos que confirmam o recebimento do valor.
+_PAID_EVENTS = frozenset({"PAYMENT_CONFIRMED", "PAYMENT_RECEIVED"})
+#: Eventos que encerram a cobrança sem pagamento.
+_CLOSED_EVENTS = frozenset({"PAYMENT_OVERDUE", "PAYMENT_DELETED", "PAYMENT_REFUNDED"})
 
-def signature_is_valid(*, signature_header: str, request_id: str, data_id: str) -> bool:
-    """Confere o HMAC do header `x-signature`."""
-    secret = settings.MERCADO_PAGO_WEBHOOK_SECRET
+
+def signature_is_valid(*, token: str) -> bool:
+    """Confere o token estático enviado no header `asaas-access-token`."""
+    secret = settings.ASAAS_WEBHOOK_TOKEN
     if not secret:
         return False
-
-    parts = dict(
-        piece.strip().split("=", 1) for piece in signature_header.split(",") if "=" in piece
-    )
-    timestamp = parts.get("ts", "")
-    received = parts.get("v1", "")
-    if not timestamp or not received:
-        return False
-
-    manifest = f"id:{data_id};request-id:{request_id};ts:{timestamp};"
-    expected = hmac.new(
-        secret.encode("utf-8"), manifest.encode("utf-8"), hashlib.sha256
-    ).hexdigest()
-    # `compare_digest` evita vazar informação por tempo de resposta.
-    return hmac.compare_digest(expected, received)
+    return hmac.compare_digest(secret, token or "")
 
 
-def handle_notification(*, topic: str, data_id: str) -> dict[str, Any]:
-    """Roteia a notificação para o tratador do seu tópico."""
-    if not data_id:
+def handle_notification(*, event: str, payment: dict[str, Any]) -> dict[str, Any]:
+    """Roteia a notificação de acordo com o evento."""
+    payment_id = str(payment.get("id") or "")
+    if not payment_id:
         return {"handled": False, "reason": "missing_id"}
 
-    if topic in ("payment", "payment.updated", "payment.created"):
-        return _handle_payment(data_id)
-    if topic in ("preapproval", "subscription_preapproval"):
-        return _handle_preapproval(data_id)
-    if topic in ("subscription_authorized_payment", "authorized_payment"):
-        return _handle_authorized_payment(data_id)
+    if event in _PAID_EVENTS:
+        return _handle_paid(payment_id, payment)
+    if event in _CLOSED_EVENTS:
+        return _handle_closed(payment_id, payment)
 
-    logger.info("Webhook do Mercado Pago ignorado: topico=%s", topic)
-    return {"handled": False, "reason": "unsupported_topic"}
+    logger.info("Webhook do Asaas ignorado: evento=%s", event)
+    return {"handled": False, "reason": "unsupported_event"}
 
 
-def _handle_payment(payment_id: str) -> dict[str, Any]:
-    """PIX avulso: aprova, expira ou ignora a fatura correspondente."""
-    from apps.payments.mercadopago import get_client
+def _handle_paid(payment_id: str, payment: dict[str, Any]) -> dict[str, Any]:
+    """PIX ou ciclo do cartão: confirma a fatura correspondente.
+
+    Quando a fatura ainda não existe aqui, é a primeira notícia de um novo
+    ciclo do cartão recorrente — o Asaas gera o pagamento do próximo mês antes
+    de avisarmos, então a fatura é criada na hora a partir da assinatura.
+    """
     from apps.plans.services import confirm_invoice
 
-    payment = get_client().get_payment(payment_id)
-    status = str(payment.get("status", ""))
-
-    invoice = SubscriptionInvoice.objects.filter(external_id=str(payment_id)).first()
+    invoice = SubscriptionInvoice.objects.filter(external_id=payment_id).first()
     if invoice is None:
-        # Pode ser um pagamento fora do escopo de assinatura (venda avulsa) ou
-        # a nossa fatura ainda não ter sido gravada. Reentrega resolve.
+        invoice = _invoice_for_new_cycle(payment)
+
+    if invoice is None:
         logger.info("Webhook sem fatura correspondente: payment=%s", payment_id)
         return {"handled": False, "reason": "invoice_not_found"}
 
-    if status == "approved":
-        confirm_invoice(invoice, provider_payload=payment)
-        return {"handled": True, "action": "invoice_paid"}
-
-    if status in ("cancelled", "rejected", "expired"):
-        SubscriptionInvoice.objects.filter(pk=invoice.pk, status=InvoiceStatus.PENDING).update(
-            status=InvoiceStatus.EXPIRED, provider_payload=payment
-        )
-        return {"handled": True, "action": "invoice_expired"}
-
-    return {"handled": True, "action": "ignored", "status": status}
+    confirm_invoice(invoice, provider_payload=payment)
+    return {"handled": True, "action": "invoice_paid"}
 
 
-def _handle_preapproval(preapproval_id: str) -> dict[str, Any]:
-    """Assinatura recorrente: autorizada, pausada ou cancelada."""
-    from apps.payments.mercadopago import get_client
-    from apps.plans.models import Subscription
-    from apps.plans.services import confirm_invoice
-
-    data = get_client().get_preapproval(preapproval_id)
-    status = str(data.get("status", ""))
-
-    subscription = Subscription.objects.filter(external_id=str(preapproval_id)).first()
-    if subscription is None:
-        logger.info("Webhook sem assinatura correspondente: preapproval=%s", preapproval_id)
-        return {"handled": False, "reason": "subscription_not_found"}
-
-    if status == "authorized":
-        # O cartão foi aceito: o primeiro ciclo está pago.
-        invoice = (
-            subscription.invoices.filter(status=InvoiceStatus.PENDING)
-            .order_by("period_start")
-            .first()
-        )
-        if invoice is not None:
-            confirm_invoice(invoice, provider_payload=data)
-        return {"handled": True, "action": "subscription_authorized"}
-
-    if status in ("cancelled", "paused"):
-        Subscription.objects.filter(pk=subscription.pk).exclude(
-            status__in=(SubscriptionStatus.CANCELLED, SubscriptionStatus.EXPIRED)
-        ).update(status=SubscriptionStatus.CANCELLED, provider_payload=data)
-        return {"handled": True, "action": "subscription_cancelled"}
-
-    return {"handled": True, "action": "ignored", "status": status}
+def _handle_closed(payment_id: str, payment: dict[str, Any]) -> dict[str, Any]:
+    """PIX vencido, cobrança excluída ou estornada: expira a fatura em aberto."""
+    updated = SubscriptionInvoice.objects.filter(
+        external_id=payment_id, status=InvoiceStatus.PENDING
+    ).update(status=InvoiceStatus.EXPIRED, provider_payload=payment)
+    if not updated:
+        return {"handled": False, "reason": "invoice_not_found"}
+    return {"handled": True, "action": "invoice_expired"}
 
 
-def _handle_authorized_payment(authorized_payment_id: str) -> dict[str, Any]:
-    """Cobrança mensal do cartão: cria e quita a fatura do novo ciclo."""
+def _invoice_for_new_cycle(payment: dict[str, Any]) -> SubscriptionInvoice | None:
+    """Cria a fatura do próximo ciclo do cartão a partir do pagamento recebido."""
     from dateutil.relativedelta import relativedelta
+    from django.utils import timezone
 
-    from apps.payments.mercadopago import get_client
-    from apps.payments.models import PaymentMethod, PaymentProvider
+    from apps.payments.models import PaymentMethod
     from apps.plans.models import Subscription
-    from apps.plans.services import confirm_invoice, period_bounds
+    from apps.plans.services import period_bounds
 
-    data = get_client().get_authorized_payment(authorized_payment_id)
-    status = str(data.get("status", ""))
-    preapproval_id = str(data.get("preapproval_id", ""))
+    subscription_id = str(payment.get("subscription") or "")
+    if not subscription_id:
+        return None
 
-    subscription = Subscription.objects.filter(external_id=preapproval_id).first()
+    subscription = Subscription.objects.filter(external_id=subscription_id).first()
     if subscription is None:
-        return {"handled": False, "reason": "subscription_not_found"}
+        return None
 
-    if status != "processed":
-        return {"handled": True, "action": "ignored", "status": status}
-
-    # O próximo ciclo começa no dia seguinte ao fim do atual; na primeira
-    # cobrança o ciclo atual pode não existir ainda.
     if subscription.current_period_end is not None:
         next_start = subscription.current_period_end + relativedelta(days=1)
     else:
-        from django.utils import timezone
-
         next_start = timezone.localdate()
-
     start, end = period_bounds(next_start)
+
     invoice, _ = SubscriptionInvoice.objects.get_or_create(
         subscription=subscription,
         period_start=start,
@@ -171,9 +126,8 @@ def _handle_authorized_payment(authorized_payment_id: str) -> dict[str, Any]:
             "method": PaymentMethod.CREDIT_CARD,
             "status": InvoiceStatus.PENDING,
             "due_date": start,
-            "provider": PaymentProvider.MERCADO_PAGO,
-            "external_id": str(authorized_payment_id),
+            "provider": subscription.provider,
+            "external_id": str(payment.get("id") or ""),
         },
     )
-    confirm_invoice(invoice, provider_payload=data)
-    return {"handled": True, "action": "cycle_renewed"}
+    return invoice

@@ -186,19 +186,19 @@ reajustar o plano não altera o que quem já assinou paga.
 *e* `current_period_end >= hoje`. Um PIX emitido e não pago não dá corte de
 graça.
 
-**Cobrança por meio de pagamento.** O Mercado Pago não faz recorrência
-automática por PIX. Daí os dois `billing_type`:
+**Cobrança por meio de pagamento.** O Asaas não faz recorrência automática
+por PIX. Daí os dois `billing_type`:
 
 | Tipo | Como funciona |
 |---|---|
-| `CARD_RECURRING` | `preapproval` no provedor. O cartão é digitado no checkout **hospedado pelo Mercado Pago** (`init_point`); nem o app nem o backend recebem número, validade ou CVV. Cada ciclo chega por webhook `subscription_authorized_payment`. |
+| `CARD_RECURRING` | `subscription` no provedor. O cartão é digitado na fatura **hospedada pelo Asaas** (`checkout_url`/`invoiceUrl`); nem o app nem o backend recebem número, validade ou CVV. Cada ciclo chega por webhook (`PAYMENT_CONFIRMED`/`PAYMENT_RECEIVED`). |
 | `PIX_MONTHLY` | Uma cobrança nova por ciclo, com QR e copia e cola. A renovação é emitida pelo Celery com antecedência configurável. |
 
 **Ciclo mensal** via `relativedelta`, não `timedelta(days=30)`: 31/01 fecha em
 27/02, sem escorregar o dia de cobrança ao longo do ano.
 
 **Idempotência.** `confirm_invoice` retorna cedo se a fatura já está paga — o
-Mercado Pago reentrega webhooks, e lançar a receita duas vezes inflaria o
+Asaas reentrega webhooks, e lançar a receita duas vezes inflaria o
 caixa. A unicidade `(subscription, period_start)` filtrada em
 `PENDING`/`PAID` faz reemitir um PIX expirado **substituir** a cobrança em vez
 de duplicar o mês.
@@ -223,12 +223,11 @@ sobre o preço do serviço. É decisão do proprietário, não do sistema.
 - Throttling por escopo: login 10/min, reset de senha 5/h.
 - CORS restrito, HSTS, cookies `Secure`/`HttpOnly`, `X-Frame-Options: DENY`.
 - Segredos exclusivamente em variáveis de ambiente.
-- Webhook de pagamento autenticado por HMAC-SHA256 (`x-signature`); sem
-  segredo configurado o endpoint recusa tudo. O status **nunca** vem do
-  corpo recebido: o `id` é usado para consultar o provedor.
+- Webhook de pagamento autenticado por token estático (`asaas-access-token`);
+  sem segredo configurado o endpoint recusa tudo.
 - Dados de cartão nunca trafegam pela Sua Barbearia: o checkout é do provedor.
-- `apps/payments/mercadopago.py` mascara chaves sensíveis antes de logar e
-  jamais registra o `access_token`.
+- `apps/payments/asaas.py` mascara chaves sensíveis antes de logar e
+  jamais registra a `access_token`.
 - `AuditLog` para operações sensíveis, com mascaramento de campos secretos.
 - `X-Request-ID` em toda requisição, propagado ao log e à auditoria.
 
@@ -282,10 +281,10 @@ A arquitetura não fecha portas para o roadmap descrito na especificação:
 
 | Evolução | Como encaixa |
 |---|---|
-| Pagamento online (Mercado Pago, Stripe, Asaas, PIX) | `payments/gateways.py` define a interface `PaymentGateway`; basta implementar e registrar em `GATEWAYS`. O `Payment` já tem `provider`, `external_id` e `provider_payload`. |
+| Pagamento online no balcão (Stripe, outros) | `payments/gateways.py` define a interface `PaymentGateway`; basta implementar e registrar em `GATEWAYS`. O `Payment` já tem `provider`, `external_id` e `provider_payload`. |
 | Push notification (Firebase) | `notifications/push.py` tem `PushProvider`; `DeviceToken` já armazena os tokens por plataforma. |
 | WhatsApp e e-mail transacional | `NotificationChannel` já prevê os canais; o envio roda em Celery. |
 | Cupons e promoções | `loyalty` já modela conta, movimentos e recompensas tipadas. |
-| Outros gateways para assinatura | `Subscription`/`SubscriptionInvoice` guardam `provider`, `external_id` e `provider_payload`; trocar o Mercado Pago por outro provedor não exige migração destrutiva. |
+| Outros gateways para assinatura | `Subscription`/`SubscriptionInvoice` guardam `provider`, `external_id` e `provider_payload`; trocar o Asaas por outro provedor não exige migração destrutiva. |
 | Multi-empresa / SaaS | Toda operação é ancorada em `Branch`; introduzir uma `Company` acima de `Branch` não exige reescrever regras. |
 | Observabilidade (Sentry, Datadog, Prometheus) | `X-Request-ID` em toda requisição, logging por categoria e Sentry plugável em `settings/prod.py`. |

@@ -18,7 +18,7 @@ from django.db.models import Count, Q
 from django.utils import timezone
 
 from apps.core.exceptions import BusinessError, ConflictError
-from apps.payments import mercadopago
+from apps.payments import asaas
 from apps.payments.models import PaymentMethod, PaymentProvider
 from apps.plans.models import (
     LIVE_SUBSCRIPTION_STATUSES,
@@ -395,7 +395,7 @@ def subscribe(
         billing_type=billing_type,
         price=plan.price,
         status=SubscriptionStatus.PENDING_PAYMENT,
-        provider=PaymentProvider.MERCADO_PAGO,
+        provider=PaymentProvider.ASAAS,
     )
 
     if billing_type == BillingType.CARD_RECURRING:
@@ -407,16 +407,18 @@ def subscribe(
 
 
 def _start_card_recurring(subscription: Subscription) -> None:
-    """Cria a assinatura recorrente e guarda o `init_point` do checkout."""
-    client = mercadopago.get_client()
-    preapproval = client.create_preapproval(
+    """Cria a assinatura recorrente e guarda a `checkout_url` do 1º ciclo."""
+    client = asaas.get_client()
+    card_subscription = client.create_card_subscription(
         amount=subscription.price,
         reason=f"Sua Barbearia - {subscription.plan.name}",
         external_reference=str(subscription.uuid),
         payer_email=subscription.client.user.email,
+        payer_name=subscription.client.full_name,
+        payer_cpf=subscription.client.cpf,
     )
-    subscription.external_id = preapproval.external_id
-    subscription.provider_payload = {"preapproval": preapproval.payload}
+    subscription.external_id = card_subscription.external_id
+    subscription.provider_payload = {"subscription": card_subscription.payload}
     subscription.save(update_fields=["external_id", "provider_payload", "updated_at"])
 
     start, end = period_bounds(timezone.localdate())
@@ -428,10 +430,10 @@ def _start_card_recurring(subscription: Subscription) -> None:
         method=PaymentMethod.CREDIT_CARD,
         status=InvoiceStatus.PENDING,
         due_date=start,
-        provider=PaymentProvider.MERCADO_PAGO,
-        external_id=preapproval.external_id,
-        checkout_url=preapproval.init_point,
-        provider_payload=preapproval.payload,
+        provider=PaymentProvider.ASAAS,
+        external_id=card_subscription.first_payment_id,
+        checkout_url=card_subscription.checkout_url,
+        provider_payload=card_subscription.payload,
     )
 
 
@@ -448,13 +450,13 @@ def issue_pix_invoice(subscription: Subscription, *, period_start: date_cls) -> 
     ).update(status=InvoiceStatus.EXPIRED)
 
     minutes = _config("PIX_EXPIRATION_MINUTES")
-    charge = mercadopago.get_client().create_pix_payment(
+    charge = asaas.get_client().create_pix_payment(
         amount=subscription.price,
         description=f"Sua Barbearia - {subscription.plan.name} ({start:%m/%Y})",
         external_reference=str(subscription.uuid),
         payer_email=subscription.client.user.email,
-        payer_first_name=subscription.client.user.first_name,
-        payer_last_name=subscription.client.user.last_name,
+        payer_name=subscription.client.full_name,
+        payer_cpf=subscription.client.cpf,
         expires_in_minutes=minutes,
     )
 
@@ -466,7 +468,7 @@ def issue_pix_invoice(subscription: Subscription, *, period_start: date_cls) -> 
         method=PaymentMethod.PIX,
         status=InvoiceStatus.PENDING,
         due_date=start,
-        provider=PaymentProvider.MERCADO_PAGO,
+        provider=PaymentProvider.ASAAS,
         external_id=charge.external_id,
         pix_qr_code=charge.qr_code,
         pix_qr_code_base64=charge.qr_code_base64,
@@ -482,7 +484,7 @@ def schedule_payment_poll(invoice: SubscriptionInvoice) -> None:
     """Enfileira a consulta ao provedor para a fatura recém-emitida.
 
     O webhook continua sendo o caminho principal, mas ele não cobre tudo: em
-    desenvolvimento o Mercado Pago não alcança `localhost`, e em produção uma
+    desenvolvimento o Asaas não alcança `localhost`, e em produção uma
     entrega pode atrasar ou se perder. Sem isto, o cliente paga e fica olhando
     para um plano inativo até a varredura de 20 em 20 minutos passar.
 
@@ -610,12 +612,12 @@ def cancel_subscription(
 
     if subscription.is_recurring and subscription.external_id:
         try:
-            mercadopago.get_client().cancel_preapproval(subscription.external_id)
+            asaas.get_client().cancel_subscription(subscription.external_id)
         except BusinessError as error:
             # O cancelamento local não pode ficar preso a uma falha do provedor;
             # a varredura periódica reconcilia o status depois.
             logger.warning(
-                "Falha ao cancelar preapproval %s: %s", subscription.external_id, error.detail
+                "Falha ao cancelar assinatura %s no Asaas: %s", subscription.external_id, error.detail
             )
 
     now = timezone.now()
@@ -757,7 +759,7 @@ def sync_invoice(invoice: SubscriptionInvoice) -> str:
     if invoice.status != InvoiceStatus.PENDING or not invoice.external_id:
         return "skipped"
 
-    client = mercadopago.get_client()
+    client = asaas.get_client()
     if not client.is_configured:
         return "skipped"
 
@@ -768,10 +770,10 @@ def sync_invoice(invoice: SubscriptionInvoice) -> str:
         return "pending"
 
     status = str(data.get("status", ""))
-    if status == "approved":
+    if status in ("CONFIRMED", "RECEIVED", "RECEIVED_IN_CASH"):
         confirm_invoice(invoice, provider_payload=data)
         return "confirmed"
-    if status in ("cancelled", "rejected", "expired"):
+    if status == "OVERDUE" or data.get("deleted"):
         SubscriptionInvoice.objects.filter(pk=invoice.pk).update(status=InvoiceStatus.EXPIRED)
         return "expired"
     return "pending"
@@ -782,14 +784,14 @@ def sync_pending_invoices(*, limit: int = 100) -> dict[str, int]:
     invoices = (
         SubscriptionInvoice.objects.filter(
             status=InvoiceStatus.PENDING,
-            provider=PaymentProvider.MERCADO_PAGO,
+            provider=PaymentProvider.ASAAS,
             method=PaymentMethod.PIX,
         )
         .exclude(external_id="")
         .select_related("subscription__plan", "subscription__client__user")[:limit]
     )
 
-    if not mercadopago.get_client().is_configured:
+    if not asaas.get_client().is_configured:
         return {"checked": 0, "confirmed": 0}
 
     confirmed = 0

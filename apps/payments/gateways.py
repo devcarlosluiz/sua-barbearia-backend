@@ -1,9 +1,9 @@
 """Abstração de gateway de pagamento.
 
 O sistema nunca fala diretamente com um provedor: ele conversa com a interface
-`PaymentGateway`. Hoje só existe o `ManualGateway` (registro no caixa). Para
-plugar Mercado Pago, Stripe ou Asaas basta implementar a interface e registrar
-o provider em `GATEWAYS` — nenhuma outra camada muda.
+`PaymentGateway`. Hoje só existe o `ManualGateway` (registro no caixa); o
+pagamento online de planos mensais fala com o Asaas diretamente em
+`apps/plans/services.py`, via `apps/payments/asaas.py`.
 """
 
 from __future__ import annotations

@@ -78,7 +78,7 @@ class TestAssinaturaPorPix:
         assert plan.name in entry.description
 
     def test_confirmar_duas_vezes_nao_duplica_a_receita(self, client_profile, plan, fake_gateway):
-        """O Mercado Pago reentrega webhooks: a confirmação é idempotente."""
+        """O Asaas reentrega webhooks: a confirmação é idempotente."""
         from apps.finance.models import Transaction, TransactionCategory
 
         subscription = subscribe(
@@ -112,7 +112,7 @@ class TestAssinaturaPorPix:
 
 class TestAssinaturaPorCartao:
     def test_cartao_devolve_o_checkout_do_provedor(self, auth, client_profile, plan, fake_gateway):
-        """O cartão é digitado no site do Mercado Pago, não no app."""
+        """O cartão é digitado na fatura hospedada do Asaas, não no app."""
         api = auth(client_profile.user)
         response = api.post(
             "/api/v1/subscriptions/subscribe/",
@@ -124,7 +124,7 @@ class TestAssinaturaPorCartao:
 
         invoice = payload["open_invoice"]
         assert invoice["method"] == "CREDIT_CARD"
-        assert invoice["checkout_url"] == "https://mp.test/checkout/preapp-1"
+        assert invoice["checkout_url"] == "https://asaas.test/i/pay-1"
 
         # Nenhum dado de cartão trafega pela nossa API, e o retorno bruto do
         # provedor não vaza para o app.
@@ -133,14 +133,16 @@ class TestAssinaturaPorCartao:
             assert leak not in body, f"'{leak}' não pode aparecer na resposta"
 
         subscription = Subscription.objects.get(pk=payload["id"])
-        assert subscription.external_id == "preapp-1"
-        # Também não pedimos dado de cartão ao provedor: só o e-mail do pagador.
-        preapproval = fake_gateway.called("create_preapproval")[0]
-        assert set(preapproval) == {
+        assert subscription.external_id == "sub-1"
+        # Também não pedimos dado de cartão ao provedor: só os dados do pagador.
+        card_subscription = fake_gateway.called("create_card_subscription")[0]
+        assert set(card_subscription) == {
             "amount",
             "reason",
             "external_reference",
             "payer_email",
+            "payer_name",
+            "payer_cpf",
         }
 
     def test_cancelar_recorrente_avisa_o_provedor(self, auth, client_profile, plan, fake_gateway):
@@ -151,7 +153,7 @@ class TestAssinaturaPorCartao:
         api = auth(client_profile.user)
         response = api.post(f"/api/v1/subscriptions/{subscription.id}/cancel/", {}, format="json")
         assert response.status_code == 200, response.content
-        assert fake_gateway.cancelled_preapprovals == ["preapp-1"]
+        assert fake_gateway.cancelled_subscriptions == ["sub-1"]
 
 
 class TestRegrasDeAssinatura:
@@ -480,7 +482,7 @@ class TestManutencaoPeriodica:
         subscription = subscribe(
             client=client_profile, plan=plan, billing_type=BillingType.PIX_MONTHLY
         )
-        fake_gateway.payment_status = "approved"
+        fake_gateway.payment_status = "CONFIRMED"
 
         assert sync_pending_invoices() == {"checked": 1, "confirmed": 1}
 
@@ -493,7 +495,7 @@ class TestManutencaoPeriodica:
         subscription = subscribe(
             client=client_profile, plan=plan, billing_type=BillingType.PIX_MONTHLY
         )
-        fake_gateway.payment_status = "cancelled"
+        fake_gateway.payment_status = "OVERDUE"
 
         sync_pending_invoices()
         assert subscription.invoices.get().status == InvoiceStatus.EXPIRED
